@@ -1,12 +1,15 @@
 # XPath 辅助工具 (XPath Helper)
 
-![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.3.2-blue.svg)
 ![Manifest](https://img.shields.io/badge/manifest-V3-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
 
 **XPath 辅助工具** 是一款基于 Chrome Manifest V3 开发的开发者工具，旨在帮助开发者快速获取、验证和调试网页元素的 XPath 路径。
 
-> **v1.3.0 更新亮点**：全新采用 **Chrome Side Panel (侧边栏)** 设计，不再遮挡网页内容，支持 Shift+悬停 快速捕获！
+> **v1.3.2 更新亮点**：
+> - 🚀 **UI 布局深度优化**：验证按钮居中设计，操作逻辑更清晰，清除按钮位置调整，提升交互体验。
+> - 📁 **侧边栏 (Side Panel)**：采用 Chrome 标准侧览设计，不遮挡网页内容。
+> - 👆 **快速捕获**：支持 Shift+悬停 瞬时获取元素 XPath。
 
 ## ✨ 核心功能
 
