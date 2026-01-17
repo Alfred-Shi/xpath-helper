@@ -33,19 +33,23 @@ function getXPath(element) {
 
   while (current && current.nodeType === Node.ELEMENT_NODE) {
     let index = 0;
+    // 使用 localName 以更好地支持 SVG 和 HTML
+    const currentTagName = current.localName;
+    const isSVG = current.namespaceURI === 'http://www.w3.org/2000/svg';
+
     let sibling = current.previousSibling;
 
     // 计算同名兄弟元素的索引
     while (sibling) {
-      if (sibling.nodeType === Node.ELEMENT_NODE && sibling.nodeName === current.nodeName) {
+      if (sibling.nodeType === Node.ELEMENT_NODE && sibling.localName === currentTagName) {
         index++;
       }
       sibling = sibling.previousSibling;
     }
 
-    const tagName = current.nodeName.toLowerCase();
+    const tagNameStr = isSVG ? `*[local-name()='${currentTagName}']` : currentTagName;
     const pathIndex = index > 0 ? `[${index + 1}]` : '';
-    path = `/${tagName}${pathIndex}${path}`;
+    path = `/${tagNameStr}${pathIndex}${path}`;
 
     current = current.parentNode;
   }
@@ -64,11 +68,17 @@ function getSmartXPath(element) {
     return `//*[@id="${element.id}"]`;
   }
 
+  // 通用的 class 获取方式（支持 SVG 和 HTML）
+  const className = element.getAttribute('class');
+
   // 如果有唯一的 class
-  if (element.className && typeof element.className === 'string') {
-    const classes = element.className.trim().split(/\s+/);
+  if (className && className.trim()) {
+    const classes = className.trim().split(/\s+/);
     if (classes.length > 0 && classes[0]) {
-      const xpath = `//${element.tagName.toLowerCase()}[@class="${classes[0]}"]`;
+      const isSVG = element.namespaceURI === 'http://www.w3.org/2000/svg';
+      const tagNameStr = isSVG ? `*[local-name()='${element.localName}']` : element.localName;
+
+      const xpath = `//${tagNameStr}[@class="${classes[0]}"]`;
       // 验证是否唯一
       const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
       if (result.snapshotLength === 1) {
@@ -79,7 +89,10 @@ function getSmartXPath(element) {
 
   // 如果有 name 属性
   if (element.name) {
-    const xpath = `//${element.tagName.toLowerCase()}[@name="${element.name}"]`;
+    const isSVG = element.namespaceURI === 'http://www.w3.org/2000/svg';
+    const tagNameStr = isSVG ? `*[local-name()='${element.localName}']` : element.localName;
+
+    const xpath = `//${tagNameStr}[@name="${element.name}"]`;
     const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
     if (result.snapshotLength === 1) {
       return xpath;
@@ -201,9 +214,9 @@ function captureElement(element) {
   chrome.runtime.sendMessage({
     type: 'XPATH_CAPTURED',
     xpath: xpath,
-    tagName: element.tagName.toLowerCase(),
+    tagName: element.localName,
     id: element.id || '',
-    className: element.className || '',
+    className: element.getAttribute('class') || '', // 修复 SVG class 显示问题
     text: element.textContent?.substring(0, 50) || ''
   });
 }

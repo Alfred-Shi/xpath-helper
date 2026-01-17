@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XPath SVG Test</title>
+</head>
+
+<body>
+    <div id="container">
+        <h1>SVG Test</h1>
+        <!-- Simple SVG -->
+        <svg width="100" height="100" id="test-svg" class="my-svg-class">
+            <circle cx="50" cy="50" r="40" stroke="green" stroke-width="4" fill="yellow" />
+            <path d="M10 10 H 90 V 90 H 10 L 10 10" stroke="black" id="test-path" />
+        </svg>
+    </div>
+
+    <script>
+        function testXPath(xpath) {
+            try {
+                const result = document.evaluate(
+                    xpath,
+                    document,
+                    null,
+                    XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+                    null
+                );
+                console.log(`XPath: "${xpath}" - Matches: ${result.snapshotLength}`);
+                return result.snapshotLength;
+            } catch (e) {
+                console.error(`XPath: "${xpath}" - Error: ${e.message}`);
+                return 0;
+            }
+        }
+
+        console.log("--- Testing HTML Elements ---");
+        testXPath("/html/body/div");
+        testXPath("//h1");
+
+        console.log("--- Testing SVG Elements (Direct Tag Name) ---");
+        testXPath("//svg");
+        testXPath("//path");
+        testXPath("/html/body/div/svg");
+        testXPath("/html/body/div/svg/path");
+
+        console.log("--- Testing SVG Elements (local-name()) ---");
+        testXPath("//*[local-name()='svg']");
+        testXPath("//*[local-name()='path']");
+        testXPath("/html/body/div/*[local-name()='svg']");
+        testXPath("/html/body/div/*[local-name()='svg']/*[local-name()='path']");
+
+        const svgEl = document.querySelector('svg');
+        console.log("SVG className type:", typeof svgEl.className);
+        console.log("SVG className value:", svgEl.className);
+        console.log("SVG class via getAttribute:", svgEl.getAttribute('class'));
+
+    </script>
+</body>
+
+</html>

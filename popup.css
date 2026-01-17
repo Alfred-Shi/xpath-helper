@@ -276,7 +276,7 @@ body {
     background: linear-gradient(135deg, #FF9800 0%, #f57c00 100%);
     color: white;
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     align-items: center;
 }
 
@@ -286,6 +286,7 @@ body {
     border-radius: 12px;
     font-size: 0.8rem;
     font-weight: 700;
+    margin-left: var(--spacing-sm);
 }
 
 /* 信息显示区域 */
