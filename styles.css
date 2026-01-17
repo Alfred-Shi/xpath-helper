@@ -1,0 +1,40 @@
+/* XPath 辅助工具 - 内容脚本样式 */
+
+/* 悬停高亮样式 */
+.xpath-helper-hover {
+  outline: 2px dashed #4CAF50 !important;
+  outline-offset: 2px !important;
+  background-color: rgba(76, 175, 80, 0.1) !important;
+  cursor: crosshair !important;
+  transition: all 0.2s ease !important;
+}
+
+/* 点击高亮样式 */
+.xpath-helper-click {
+  outline: 3px solid #2196F3 !important;
+  outline-offset: 2px !important;
+  background-color: rgba(33, 150, 243, 0.15) !important;
+  box-shadow: 0 0 10px rgba(33, 150, 243, 0.5) !important;
+  animation: xpath-pulse 1s ease-in-out !important;
+}
+
+/* 验证高亮样式 */
+.xpath-helper-validate {
+  outline: 3px solid #FF9800 !important;
+  outline-offset: 2px !important;
+  background-color: rgba(255, 152, 0, 0.15) !important;
+  box-shadow: 0 0 8px rgba(255, 152, 0, 0.6) !important;
+}
+
+/* 脉冲动画 */
+@keyframes xpath-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 15px 5px rgba(33, 150, 243, 0.3);
+  }
+  100% {
+    box-shadow: 0 0 10px rgba(33, 150, 243, 0.5);
+  }
+}

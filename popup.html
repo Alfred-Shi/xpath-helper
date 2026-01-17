@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XPath 辅助工具</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+  <div class="container">
+    <!-- 标题部分 -->
+    <header class="header">
+      <h1 class="title">
+        <span class="icon">🎯</span>
+        XPath 辅助工具
+      </h1>
+    </header>
+
+    <!-- 模式切换部分 -->
+    <section class="mode-section">
+      <div class="mode-card">
+        <div class="mode-header">
+          <span class="mode-icon">👆</span>
+          <h3 class="mode-title">捕获模式</h3>
+        </div>
+        <p class="mode-description">鼠标悬停高亮，点击元素获取 XPath</p>
+        <button id="toggleCapture" class="btn btn-primary">
+          <span class="btn-icon">▶</span>
+          <span class="btn-text">启动</span>
+        </button>
+      </div>
+
+      <div class="mode-card">
+        <div class="mode-header">
+          <span class="mode-icon">🔍</span>
+          <h3 class="mode-title">验证模式</h3>
+        </div>
+        <p class="mode-description">输入 XPath，实时高亮匹配元素</p>
+        <button id="toggleValidate" class="btn btn-secondary">
+          <span class="btn-icon">▶</span>
+          <span class="btn-text">启动</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- XPath 输入/显示区域 -->
+    <section class="xpath-section">
+      <div class="input-group">
+        <label for="xpathInput" class="label">XPath 表达式</label>
+        <div class="input-wrapper">
+          <input type="text" id="xpathInput" class="xpath-input" placeholder="输入或点击元素获取 XPath..." autocomplete="off">
+          <button id="copyBtn" class="copy-btn" title="复制 XPath">
+            <span class="copy-icon">📋</span>
+          </button>
+          <button id="clearExpressionBtn" class="copy-btn clear-expression-btn" title="清除表达式">
+            <span class="copy-icon">✖️</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 验证按钮 -->
+      <button id="validateBtn" class="btn btn-validate">
+        <span>验证 XPath</span>
+        <span id="matchCount" class="match-count"></span>
+      </button>
+    </section>
+
+    <!-- 元素信息显示 -->
+    <section class="info-section" id="infoSection" style="display: none;">
+      <h4 class="info-title">元素信息</h4>
+      <div class="info-grid">
+        <div class="info-item">
+          <span class="info-label">标签:</span>
+          <span id="tagName" class="info-value">-</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">ID:</span>
+          <span id="elementId" class="info-value">-</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Class:</span>
+          <span id="className" class="info-value">-</span>
+        </div>
+        <div class="info-item full-width">
+          <span class="info-label">文本:</span>
+          <span id="textContent" class="info-value">-</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 匹配元素列表 -->
+    <section class="matches-section" id="matchesSection" style="display: none;">
+      <div class="matches-header">
+        <h4 class="info-title">匹配元素列表</h4>
+        <button id="toggleMatchesBtn" class="toggle-matches-btn">
+          <span id="toggleIcon">▼</span>
+        </button>
+      </div>
+      <div id="matchesList" class="matches-list">
+        <!-- 动态生成的元素列表 -->
+      </div>
+    </section>
+
+    <!-- 操作按钮 -->
+    <section class="actions-section">
+      <button id="clearBtn" class="btn btn-clear">
+        <span>清除高亮</span>
+      </button>
+    </section>
+
+    <!-- 状态提示 -->
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+
+</html>
