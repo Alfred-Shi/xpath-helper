@@ -8,6 +8,7 @@ let currentHighlightedElement = null;
 let validationHighlightedElements = [];
 let isCtrlPressed = false; // 追踪 Ctrl 键状态
 let lastHoveredElement = null; // 追踪最后悬停的元素
+let ctrlSelectedElements = []; // 存储按住 Ctrl 点击的多选元素
 
 // 高亮样式类名
 const HOVER_HIGHLIGHT_CLASS = 'xpath-helper-hover';
@@ -15,13 +16,32 @@ const CLICK_HIGHLIGHT_CLASS = 'xpath-helper-click';
 const VALIDATE_HIGHLIGHT_CLASS = 'xpath-helper-validate';
 
 /**
+ * 判断是否为动态生成的 ID (如 React, Vue, Guid 或大量数字等)
+ * @param {string} id - 待校验的 ID
+ * @returns {boolean} - 是否为动态 ID
+ */
+function isDynamicId(id) {
+  if (!id || typeof id !== 'string') return true;
+  // GUID/UUID (例如: 531e1d66-4728-4db7-a827-e389a6bedfc8)
+  if (/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i.test(id)) return true;
+  // React 18 / floating-ui 自动生成的 ID，形如 ":r0:", ":r1:"
+  if (/^:r[0-9a-zA-Z_]+:$/.test(id)) return true;
+  // 包含 5 个及以上连续数字的 ID (往往是数据库自增 ID 或时间戳)
+  if (/\d{5,}/.test(id)) return true;
+  // 带有长数字后缀的框架生成 ID (例如: ember12345)
+  if (/[a-zA-Z_]+\d{4,}$/.test(id)) return true;
+  return false;
+}
+
+/**
  * 生成元素的 XPath 路径
  * @param {Element} element - 目标元素
  * @returns {string} - 元素的 XPath 路径
  */
 function getXPath(element) {
-  if (element.id) {
-    return `//*[@id="${element.id}"]`;
+  const id = element.getAttribute('id');
+  if (id && id.trim() && !isDynamicId(id.trim())) {
+    return `//*[@id="${id.trim()}"]`;
   }
 
   if (element === document.body) {
@@ -58,48 +78,63 @@ function getXPath(element) {
 }
 
 /**
- * 生成更智能的 XPath（优先使用 id、class、属性等）
+ * 生成更智能的 XPath（优先使用现代测试属性、唯一稳定 id、唯一包含 class 等）
  * @param {Element} element - 目标元素
  * @returns {string} - 优化后的 XPath 路径
  */
 function getSmartXPath(element) {
-  // 如果有 id，直接使用
-  if (element.id) {
-    return `//*[@id="${element.id}"]`;
+  const isSVG = element.namespaceURI === 'http://www.w3.org/2000/svg';
+  const tagNameStr = isSVG ? `*[local-name()='${element.localName}']` : element.localName;
+
+  // 1. 优先使用现代测试/定位属性
+  const testAttrs = ['data-testid', 'data-qa', 'data-cy', 'data-target'];
+  for (const attr of testAttrs) {
+    const val = element.getAttribute(attr);
+    if (val && val.trim()) {
+      const xpath = `//${tagNameStr}[@${attr}="${val.trim()}"]`;
+      try {
+        const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+        if (result.snapshotLength === 1) {
+          return xpath;
+        }
+      } catch (e) {}
+    }
   }
 
-  // 通用的 class 获取方式（支持 SVG 和 HTML）
+  // 2. 如果有唯一的稳定 ID，直接使用
+  const id = element.getAttribute('id');
+  if (id && id.trim() && !isDynamicId(id.trim())) {
+    return `//*[@id="${id.trim()}"]`;
+  }
+
+  // 3. 如果有唯一的 class（支持包含匹配以处理多类名）
   const className = element.getAttribute('class');
-
-  // 如果有唯一的 class
   if (className && className.trim()) {
-    const classes = className.trim().split(/\s+/);
+    const classes = className.trim().split(/\s+/).filter(Boolean);
     if (classes.length > 0 && classes[0]) {
-      const isSVG = element.namespaceURI === 'http://www.w3.org/2000/svg';
-      const tagNameStr = isSVG ? `*[local-name()='${element.localName}']` : element.localName;
+      const xpath = `//${tagNameStr}[contains(concat(' ', normalize-space(@class), ' '), ' ${classes[0]} ')]`;
+      try {
+        const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+        if (result.snapshotLength === 1) {
+          return xpath;
+        }
+      } catch (e) {}
+    }
+  }
 
-      const xpath = `//${tagNameStr}[@class="${classes[0]}"]`;
-      // 验证是否唯一
+  // 4. 如果有唯一的 name 属性
+  const name = element.getAttribute('name');
+  if (name && name.trim()) {
+    const xpath = `//${tagNameStr}[@name="${name.trim()}"]`;
+    try {
       const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
       if (result.snapshotLength === 1) {
         return xpath;
       }
-    }
+    } catch (e) {}
   }
 
-  // 如果有 name 属性
-  if (element.name) {
-    const isSVG = element.namespaceURI === 'http://www.w3.org/2000/svg';
-    const tagNameStr = isSVG ? `*[local-name()='${element.localName}']` : element.localName;
-
-    const xpath = `//${tagNameStr}[@name="${element.name}"]`;
-    const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-    if (result.snapshotLength === 1) {
-      return xpath;
-    }
-  }
-
-  // 否则返回完整路径
+  // 5. 否则返回完整绝对路径
   return getXPath(element);
 }
 
@@ -110,13 +145,9 @@ function getSmartXPath(element) {
  */
 function getElementsByXPath(xpath) {
   const results = [];
-  try {
-    const query = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-    for (let i = 0; i < query.snapshotLength; i++) {
-      results.push(query.snapshotItem(i));
-    }
-  } catch (error) {
-    console.error('XPath 查询错误:', error);
+  const query = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+  for (let i = 0; i < query.snapshotLength; i++) {
+    results.push(query.snapshotItem(i));
   }
   return results;
 }
@@ -133,10 +164,11 @@ function removeAllHighlights() {
   const clickElements = document.querySelectorAll(`.${CLICK_HIGHLIGHT_CLASS}`);
   clickElements.forEach(el => el.classList.remove(CLICK_HIGHLIGHT_CLASS));
 
-  // 移除验证高亮
+  // 移除验证和相似多选高亮
   validationHighlightedElements.forEach(el => {
     if (el && el.classList) {
       el.classList.remove(VALIDATE_HIGHLIGHT_CLASS);
+      el.classList.remove(CLICK_HIGHLIGHT_CLASS);
     }
   });
   validationHighlightedElements = [];
@@ -189,11 +221,6 @@ function handleMouseMove(event) {
   if (element && element !== document.body && element !== document.documentElement) {
     highlightElement(element);
     lastHoveredElement = element; // 保存当前悬停的元素
-
-    // 如果按住 Ctrl 键（检查 event.ctrlKey 或 isCtrlPressed），自动捕获该元素
-    if (event.ctrlKey || isCtrlPressed) {
-      captureElement(element);
-    }
   }
 }
 
@@ -215,9 +242,202 @@ function captureElement(element) {
     type: 'XPATH_CAPTURED',
     xpath: xpath,
     tagName: element.localName,
-    id: element.id || '',
+    id: element.getAttribute('id') || '',
     className: element.getAttribute('class') || '', // 修复 SVG class 显示问题
     text: element.textContent?.substring(0, 50) || ''
+  });
+}
+
+/**
+ * 提取元素的路径步骤，供相似 XPath 计算使用
+ */
+function getElementPathSteps(element) {
+  const steps = [];
+  let current = element;
+  while (current && current.nodeType === Node.ELEMENT_NODE) {
+    let index = 0;
+    const tagName = current.localName;
+    const isSVG = current.namespaceURI === 'http://www.w3.org/2000/svg';
+    
+    let sibling = current.previousSibling;
+    while (sibling) {
+      if (sibling.nodeType === Node.ELEMENT_NODE && sibling.localName === tagName) {
+        index++;
+      }
+      sibling = sibling.previousSibling;
+    }
+    
+    steps.unshift({
+      tagName: tagName,
+      isSVG: isSVG,
+      index: index + 1,
+      id: current.getAttribute('id') || '',
+      className: current.getAttribute('class') || ''
+    });
+    
+    current = current.parentNode;
+  }
+  return steps;
+}
+
+/**
+ * 计算多个元素的相似 XPath
+ */
+function getSimilarityXPath(elements) {
+  if (elements.length === 0) return '';
+  if (elements.length === 1) return getSmartXPath(elements[0]);
+
+  const allSteps = elements.map(getElementPathSteps);
+  const minLen = Math.min(...allSteps.map(steps => steps.length));
+  
+  let pivotIndex = -1;
+  let pivotType = ''; // 'id' 或 'class'
+  let pivotValue = '';
+
+  // 从右往左（从叶子到根）寻找第一个公共的 ID 或 Class 作为优化锚点
+  for (let i = minLen - 1; i >= 0; i--) {
+    const levelSteps = allSteps.map(steps => steps[i]);
+    const firstStep = levelSteps[0];
+    
+    // 检查是否全都有相同的 ID，且不是动态 ID
+    const sameId = firstStep.id && !isDynamicId(firstStep.id) && levelSteps.every(step => step.id === firstStep.id);
+    if (sameId) {
+      pivotIndex = i;
+      pivotType = 'id';
+      pivotValue = firstStep.id;
+      break;
+    }
+    
+    // 检查是否全都有相同的 Class
+    const classesList = levelSteps.map(step => {
+      const cls = step.className;
+      if (!cls) return [];
+      const clsStr = typeof cls === 'string' ? cls : (cls.baseVal || '');
+      return clsStr.trim().split(/\s+/).filter(Boolean);
+    });
+    
+    let commonClasses = [];
+    if (classesList.length > 0) {
+      commonClasses = classesList[0].filter(cls => 
+        classesList.every(clsList => clsList.includes(cls))
+      );
+    }
+    
+    if (commonClasses.length > 0) {
+      pivotIndex = i;
+      pivotType = 'class';
+      pivotValue = commonClasses[0];
+      break;
+    }
+  }
+
+  const xpathParts = [];
+  let startIdx = 0;
+
+  if (pivotIndex !== -1) {
+    if (pivotType === 'id') {
+      xpathParts.push(`//*[@id="${pivotValue}"]`);
+    } else if (pivotType === 'class') {
+      const firstStep = allSteps[0][pivotIndex];
+      const tagNameStr = firstStep.isSVG ? `*[local-name()='${firstStep.tagName}']` : firstStep.tagName;
+      xpathParts.push(`//${tagNameStr}[contains(@class, "${pivotValue}")]`);
+    }
+    startIdx = pivotIndex + 1;
+  } else {
+    xpathParts.push(''); // 代表绝对路径开头 '/'
+  }
+
+  for (let i = startIdx; i < minLen; i++) {
+    const levelSteps = allSteps.map(steps => steps[i]);
+    const firstStep = levelSteps[0];
+    const sameTagName = levelSteps.every(step => step.tagName === firstStep.tagName);
+    
+    if (!sameTagName) {
+      xpathParts.push('*');
+      continue;
+    }
+    
+    const tagNameStr = firstStep.isSVG ? `*[local-name()='${firstStep.tagName}']` : firstStep.tagName;
+    
+    // 寻找该层级的公共 Class
+    const classesList = levelSteps.map(step => {
+      const cls = step.className;
+      if (!cls) return [];
+      const clsStr = typeof cls === 'string' ? cls : (cls.baseVal || '');
+      return clsStr.trim().split(/\s+/).filter(Boolean);
+    });
+    
+    let commonClasses = [];
+    if (classesList.length > 0) {
+      commonClasses = classesList[0].filter(cls => 
+        classesList.every(clsList => clsList.includes(cls))
+      );
+    }
+    
+    // 检查所有元素的兄弟索引是否完全相同
+    const sameIndex = levelSteps.every(step => step.index === firstStep.index);
+    
+    let stepStr = tagNameStr;
+    if (commonClasses.length > 0) {
+      stepStr += `[contains(@class, "${commonClasses[0]}")]`;
+    } else if (sameIndex) {
+      stepStr += `[${firstStep.index}]`;
+    }
+    
+    xpathParts.push(stepStr);
+  }
+
+  return xpathParts.join('/');
+}
+
+/**
+ * 处理多选元素并计算相似 XPath
+ */
+function processMultiSelection() {
+  if (ctrlSelectedElements.length === 0) return;
+
+  const similarityXpath = getSimilarityXPath(ctrlSelectedElements);
+  if (!similarityXpath) return;
+
+  const matchedElements = getElementsByXPath(similarityXpath);
+  
+  // 清除前一次的多选和悬停高亮
+  removeAllHighlights();
+  
+  // 将匹配到的所有相似元素高亮为蓝色
+  matchedElements.forEach(el => {
+    if (el && el.classList) {
+      el.classList.add(CLICK_HIGHLIGHT_CLASS);
+      validationHighlightedElements.push(el);
+    }
+  });
+
+  // 获取这些匹配元素的详细属性，供 Side Panel 展示
+  const elementsInfo = matchedElements.map((el, index) => {
+    return {
+      index: index + 1,
+      tagName: el.tagName?.toLowerCase() || '',
+      id: el.getAttribute('id') || '',
+      className: typeof el.getAttribute('class') === 'string' ? el.getAttribute('class') : '',
+      text: el.textContent?.trim().substring(0, 100) || '',
+      attributes: Array.from(el.attributes || []).map(attr => ({
+        name: attr.name,
+        value: attr.value
+      })).slice(0, 5)
+    };
+  });
+
+  // 发送 XPath 到 popup/sidepanel，携带多选标记
+  chrome.runtime.sendMessage({
+    type: 'XPATH_CAPTURED',
+    xpath: similarityXpath,
+    tagName: `${ctrlSelectedElements[0].localName} (相似元素组)`,
+    id: `已选中 ${ctrlSelectedElements.length} 个元素`,
+    className: ctrlSelectedElements[0].getAttribute('class') || '',
+    text: `当前 XPath 共匹配 ${matchedElements.length} 个相似元素`,
+    isMultiSelect: true,
+    count: matchedElements.length,
+    elements: elementsInfo
   });
 }
 
@@ -232,28 +452,34 @@ function handleClick(event) {
 
   const element = event.target;
   if (element) {
-    captureElement(element);
-  }
-}
-
-/**
- * 键盘按下事件处理器（追踪 Ctrl 键）
- */
-function handleKeyDown(event) {
-  if (event.key === 'Control' && !isCtrlPressed) {
-    isCtrlPressed = true;
-    // 如果当前有悬停的元素且在捕获模式下，立即捕获
-    if (captureMode && lastHoveredElement) {
-      captureElement(lastHoveredElement);
+    if (event.ctrlKey || event.metaKey || isCtrlPressed) {
+      // 多选模式
+      if (!ctrlSelectedElements.includes(element)) {
+        ctrlSelectedElements.push(element);
+      }
+      processMultiSelection();
+    } else {
+      // 单选模式：清空之前的多选，进行单选捕获
+      ctrlSelectedElements = [];
+      captureElement(element);
     }
   }
 }
 
 /**
- * 键盘释放事件处理器（追踪 Ctrl 键）
+ * 键盘按下事件处理器（追踪 Ctrl 键和 Mac Command 键）
+ */
+function handleKeyDown(event) {
+  if ((event.key === 'Control' || event.key === 'Meta') && !isCtrlPressed) {
+    isCtrlPressed = true;
+  }
+}
+
+/**
+ * 键盘释放事件处理器（追踪 Ctrl 键和 Mac Command 键）
  */
 function handleKeyUp(event) {
-  if (event.key === 'Control') {
+  if (event.key === 'Control' || event.key === 'Meta') {
     isCtrlPressed = false;
   }
 }
@@ -267,6 +493,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       captureMode = message.enabled;
       if (!captureMode) {
         removeAllHighlights();
+        ctrlSelectedElements = [];
       }
       sendResponse({ success: true });
       break;
@@ -280,29 +507,53 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break;
 
     case 'VALIDATE_XPATH':
-      const elements = getElementsByXPath(message.xpath);
-      highlightValidationElements(elements);
+      try {
+        const elements = getElementsByXPath(message.xpath);
+        highlightValidationElements(elements);
 
-      // 提取每个元素的详细信息
-      const elementsInfo = elements.map((el, index) => {
-        return {
-          index: index + 1,
-          tagName: el.tagName?.toLowerCase() || '',
-          id: el.id || '',
-          className: typeof el.className === 'string' ? el.className : '',
-          text: el.textContent?.trim().substring(0, 100) || '',
-          attributes: Array.from(el.attributes || []).map(attr => ({
-            name: attr.name,
-            value: attr.value
-          })).slice(0, 5) // 只取前5个属性
-        };
-      });
+        // 提取每个元素的详细信息
+        const elementsInfo = elements.map((el, index) => {
+          return {
+            index: index + 1,
+            tagName: el.tagName?.toLowerCase() || '',
+            id: el.getAttribute('id') || '',
+            className: typeof el.getAttribute('class') === 'string' ? el.getAttribute('class') : '',
+            text: el.textContent?.trim().substring(0, 100) || '',
+            attributes: Array.from(el.attributes || []).map(attr => ({
+              name: attr.name,
+              value: attr.value
+            })).slice(0, 5) // 只取前5个属性
+          };
+        });
 
-      sendResponse({
-        success: true,
-        count: elements.length,
-        elements: elementsInfo
-      });
+        sendResponse({
+          success: true,
+          count: elements.length,
+          elements: elementsInfo
+        });
+      } catch (error) {
+        console.error('XPath 验证错误:', error);
+        sendResponse({
+          success: false,
+          error: error.message || 'XPath 语法错误'
+        });
+      }
+      break;
+
+    case 'SCROLL_TO_ELEMENT':
+      // validationHighlightedElements 包含了当前匹配或捕获的高亮元素
+      const targetElement = validationHighlightedElements[message.index - 1];
+      if (targetElement) {
+        targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // 添加闪烁样式类
+        targetElement.classList.add('xpath-helper-flash');
+        setTimeout(() => {
+          targetElement.classList.remove('xpath-helper-flash');
+        }, 1500);
+        sendResponse({ success: true });
+      } else {
+        sendResponse({ success: false, error: '未找到该元素，或该元素已不再处于高亮状态' });
+      }
       break;
 
     case 'TOGGLE_CAPTURE_MODE_SHORTCUT':
@@ -323,6 +574,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       captureMode = false;
       validateMode = false;
       removeAllHighlights();
+      ctrlSelectedElements = [];
       sendResponse({ success: true });
       break;
 

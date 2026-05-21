@@ -481,6 +481,7 @@ body {
     padding: var(--spacing-sm);
     margin-bottom: var(--spacing-sm);
     transition: var(--transition);
+    cursor: pointer;
 }
 
 .match-item:last-child {

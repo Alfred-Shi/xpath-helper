@@ -38,3 +38,19 @@
     box-shadow: 0 0 10px rgba(33, 150, 243, 0.5);
   }
 }
+
+/* 元素闪烁定位动画 */
+.xpath-helper-flash {
+  animation: xpath-flash 0.5s ease-in-out 3 !important;
+}
+
+@keyframes xpath-flash {
+  0%, 100% {
+    background-color: rgba(255, 152, 0, 0.15) !important;
+    outline: 3px solid #FF9800 !important;
+  }
+  50% {
+    background-color: rgba(255, 235, 59, 0.6) !important;
+    outline: 3px solid #FFEB3B !important;
+  }
+}

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "XPath 辅助工具",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "description": "一个强大的 XPath 辅助工具，支持元素捕获和 XPath 验证功能",
   "permissions": [
     "activeTab",
@@ -36,7 +36,8 @@
       "css": [
         "styles.css"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "icons": {

@@ -36,10 +36,25 @@ async function init() {
         console.error('无法连接后台:', e);
     }
 
-    // 从存储中恢复状态
-    chrome.storage.local.get(['captureMode', 'validateMode', 'lastXPath'], (data) => {
+    // 从存储中恢复状态并同步至 Tab 页面
+    chrome.storage.local.get(['captureMode', 'validateMode', 'lastXPath'], async (data) => {
         if (data.lastXPath) {
             xpathInput.value = data.lastXPath;
+        }
+
+        if (data.captureMode) {
+            captureMode = true;
+            updateButtonState(toggleCaptureBtn, true, '停止', '启动');
+            await sendMessageToTab({ type: 'TOGGLE_CAPTURE_MODE', enabled: true });
+        }
+
+        if (data.validateMode) {
+            validateMode = true;
+            updateButtonState(toggleValidateBtn, true, '停止', '启动');
+            await sendMessageToTab({ type: 'TOGGLE_VALIDATE_MODE', enabled: true });
+            if (data.lastXPath) {
+                validateXPath();
+            }
         }
     });
 }
@@ -185,6 +200,11 @@ async function validateXPath() {
 
         // 保存 XPath
         chrome.storage.local.set({ lastXPath: xpath });
+    } else {
+        const errMsg = response?.error || 'XPath 语法错误';
+        matchCount.textContent = '语法错误';
+        showToast(`❌ ${errMsg}`, 'error');
+        matchesSection.style.display = 'none';
     }
 }
 
@@ -308,6 +328,13 @@ function displayMatchedElements(elements) {
         }
 
         itemDiv.innerHTML = html;
+        // 绑定点击事件以滚动并闪烁网页上的目标元素
+        itemDiv.addEventListener('click', () => {
+            sendMessageToTab({
+                type: 'SCROLL_TO_ELEMENT',
+                index: el.index
+            });
+        });
         matchesList.appendChild(itemDiv);
     });
 
@@ -333,13 +360,40 @@ function toggleMatchesList() {
 }
 
 /**
- * 监听来自 content script 的消息
+ * 监听来自 content script 或 background 的消息
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'XPATH_CAPTURED') {
-        xpathInput.value = message.xpath;
-        showElementInfo(message);
-        showToast('✅ XPath 已生成', 'success');
+    if (message.type === 'TAB_RELOADED' && message.tabId === currentTabId) {
+        // 重置侧边栏状态以保持同步
+        captureMode = false;
+        validateMode = false;
+        updateButtonState(toggleCaptureBtn, false, '启动', '启动');
+        updateButtonState(toggleValidateBtn, false, '启动', '启动');
+        matchCount.textContent = '';
+        infoSection.style.display = 'none';
+        matchesSection.style.display = 'none';
+        matchesList.innerHTML = '';
+        showToast('ℹ️ 页面已重新加载，状态已重置', 'info');
+    } else if (message.type === 'XPATH_CAPTURED') {
+        if (message.isMultiSelect) {
+            xpathInput.value = message.xpath;
+            showElementInfo(message);
+            matchCount.textContent = `${message.count} 个匹配`;
+            
+            if (message.count === 0) {
+                matchesSection.style.display = 'none';
+            } else {
+                displayMatchedElements(message.elements);
+            }
+            
+            showToast(`✅ 相似元素 XPath 已生成 (${message.count} 个匹配)`, 'success');
+        } else {
+            xpathInput.value = message.xpath;
+            showElementInfo(message);
+            matchCount.textContent = '';
+            matchesSection.style.display = 'none';
+            showToast('✅ XPath 已生成', 'success');
+        }
 
         // 保存 XPath
         chrome.storage.local.set({ lastXPath: message.xpath });

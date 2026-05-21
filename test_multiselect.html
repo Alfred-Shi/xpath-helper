@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XPath 相似元素多选测试页面</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --accent: #10b981;
+            --border: #334155;
+        }
+
+        body {
+            font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1000px;
+            width: 100%;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            padding: 30px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+        }
+
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 2.5rem;
+            background: linear-gradient(to right, #60a5fa, #34d399);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            margin: 0;
+        }
+
+        .instructions {
+            background-color: rgba(59, 130, 246, 0.1);
+            border-left: 4px solid var(--primary);
+            padding: 20px;
+            border-radius: 0 12px 12px 0;
+            margin-bottom: 40px;
+            font-size: 1rem;
+            line-height: 1.6;
+        }
+
+        .instructions ul {
+            margin: 10px 0 0 0;
+            padding-left: 20px;
+            color: var(--text-muted);
+        }
+
+        .instructions strong {
+            color: #60a5fa;
+        }
+
+        section {
+            margin-bottom: 50px;
+        }
+
+        h2 {
+            font-size: 1.8rem;
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 10px;
+            margin-bottom: 25px;
+            color: #38bdf8;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* 网格卡片样式 */
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 25px;
+        }
+
+        .product-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+
+        .product-card:hover {
+            transform: translateY(-5px);
+            border-color: #475569;
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .product-image {
+            height: 160px;
+            background: linear-gradient(45deg, #1e3a8a, #3b82f6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+        }
+
+        .product-info {
+            padding: 20px;
+        }
+
+        .product-tag {
+            display: inline-block;
+            background-color: rgba(16, 185, 129, 0.15);
+            color: var(--accent);
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .product-title {
+            margin: 0 0 10px 0;
+            font-size: 1.25rem;
+            color: var(--text-main);
+        }
+
+        .product-desc {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            margin-bottom: 15px;
+            line-height: 1.4;
+        }
+
+        .product-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .product-price {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: #f59e0b;
+        }
+
+        .buy-btn {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+
+        .buy-btn:hover {
+            background-color: var(--primary-hover);
+        }
+
+        /* 列表样式 */
+        .list-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .news-item {
+            display: flex;
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 15px;
+            gap: 20px;
+            transition: border-color 0.2s;
+        }
+
+        .news-item:hover {
+            border-color: #475569;
+        }
+
+        .news-meta {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-width: 80px;
+            border-right: 1px solid var(--border);
+            padding-right: 15px;
+        }
+
+        .news-date {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #38bdf8;
+        }
+
+        .news-month {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .news-body {
+            flex-grow: 1;
+        }
+
+        .news-title {
+            margin: 0 0 5px 0;
+            font-size: 1.15rem;
+            color: var(--text-main);
+        }
+
+        .news-title a {
+            color: var(--text-main);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .news-title a:hover {
+            color: var(--primary);
+        }
+
+        .news-summary {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin: 0;
+            line-height: 1.4;
+        }
+
+        /* 表格样式 */
+        .table-wrapper {
+            overflow-x: auto;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            background-color: var(--card-bg);
+        }
+
+        th, td {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background-color: #111827;
+            color: #38bdf8;
+            font-weight: 600;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .status-active {
+            background-color: rgba(16, 185, 129, 0.15);
+            color: var(--accent);
+        }
+
+        .status-pending {
+            background-color: rgba(245, 158, 11, 0.15);
+            color: #f59e0b;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .user-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50px;
+            background-color: #475569;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>🎯 XPath Helper 相似元素多选测试</h1>
+            <p class="subtitle">用于验证按住 Ctrl 点击多个元素，并自动计算相似元素 XPath 路径的专用测试页面</p>
+        </header>
+
+        <div class="instructions">
+            <strong>💡 如何测试多选相似元素功能：</strong>
+            <ul>
+                <li>1. 在扩展程序中启动 <strong>“捕获模式”</strong>。</li>
+                <li>2. 按住键盘上的 <strong>Ctrl 键不松手</strong>。</li>
+                <li>3. 依次点击下方网格、列表或表格中的 <strong>两个或多个相似元素</strong>（例如：点击前两个商品的标题，或者前两个“购买”按钮）。</li>
+                <li>4. 观察页面上：<strong>所有同类相似元素会被同时高亮为蓝色</strong>。</li>
+                <li>5. 观察扩展窗口：输入框已生成<strong>泛化后的相似 XPath</strong>（去除了差异化的索引），并且侧边栏列表中已加载<strong>所有匹配到的相似元素详情</strong>！</li>
+            </ul>
+        </div>
+
+        <!-- 场景 1：网格商品卡片 -->
+        <section>
+            <h2>🛍️ 场景一：商品网格 (Card Grid)</h2>
+            <div class="grid-container">
+                <div class="product-card">
+                    <div class="product-image">📱</div>
+                    <div class="product-info">
+                        <span class="product-tag">电子产品</span>
+                        <h3 class="product-title">极光智能手机 X</h3>
+                        <p class="product-desc">搭载最新 4nm 芯片，配备 1.2 亿像素超清主摄与视网膜显示屏。</p>
+                        <div class="product-footer">
+                            <span class="product-price">¥5,999</span>
+                            <button class="buy-btn">立即购买</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="product-card">
+                    <div class="product-image">💻</div>
+                    <div class="product-info">
+                        <span class="product-tag">办公设备</span>
+                        <h3 class="product-title">幻影笔记本 Pro</h3>
+                        <p class="product-desc">超薄全铝机身，长达 18 小时超长续航，专为移动办公和创意工作设计。</p>
+                        <div class="product-footer">
+                            <span class="product-price">¥8,499</span>
+                            <button class="buy-btn">立即购买</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="product-card">
+                    <div class="product-image">🎧</div>
+                    <div class="product-info">
+                        <span class="product-tag">数码配件</span>
+                        <h3 class="product-title">声之静无线降噪耳机</h3>
+                        <p class="product-desc">智能自适应主动降噪，高保真音质，带来身临其境的音乐殿堂体验。</p>
+                        <div class="product-footer">
+                            <span class="product-price">¥1,299</span>
+                            <button class="buy-btn">立即购买</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 场景 2：新闻新闻列表 -->
+        <section>
+            <h2>📰 场景二：新闻信息流 (News List)</h2>
+            <div class="list-container">
+                <div class="news-item">
+                    <div class="news-meta">
+                        <span class="news-date">18</span>
+                        <span class="news-month">5月</span>
+                    </div>
+                    <div class="news-body">
+                        <h3 class="news-title"><a href="#">重磅！下一代 AI 智能体框架 Antigravity 正式开源</a></h3>
+                        <p class="news-summary">该框架实现了高度自适应的代码分析和重构，能极大地提升开发者与 AI 协作编程的效率，改变传统软件开发模式。</p>
+                    </div>
+                </div>
+
+                <div class="news-item">
+                    <div class="news-meta">
+                        <span class="news-date">16</span>
+                        <span class="news-month">5月</span>
+                    </div>
+                    <div class="news-body">
+                        <h3 class="news-title"><a href="#">全球开发者大会：云原生与边缘计算融合成为新趋势</a></h3>
+                        <p class="news-summary">在今年的峰会上，各大科技巨头纷纷展示了其最新的分布式云架构方案，旨在解决物联网时代超低延迟的算力需求。</p>
+                    </div>
+                </div>
+
+                <div class="news-item">
+                    <div class="news-meta">
+                        <span class="news-date">12</span>
+                        <span class="news-month">5月</span>
+                    </div>
+                    <div class="news-body">
+                        <h3 class="news-title"><a href="#">绿色计算倡议：如何设计低能耗高效率的 Web 应用</a></h3>
+                        <p class="news-summary">随着数据中心碳排放问题日益严峻，前端性能优化与静态化渲染正被赋予全新的环保意义，成为现代架构的必修课。</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 场景 3：数据表格 -->
+        <section>
+            <h2>📊 场景三：用户数据表 (Data Table)</h2>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>用户</th>
+                            <th>角色</th>
+                            <th>状态</th>
+                            <th>加入时间</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>
+                                <div class="user-info">
+                                    <div class="user-avatar" style="background-color: #3b82f6;">A</div>
+                                    <div>
+                                        <div style="font-weight: 500;">阿尔法</div>
+                                        <div style="font-size: 0.8rem; color: var(--text-muted);">alpha@example.com</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>系统管理员</td>
+                            <td><span class="status-badge status-active">活跃</span></td>
+                            <td>2026-01-10</td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <div class="user-info">
+                                    <div class="user-avatar" style="background-color: #10b981;">B</div>
+                                    <div>
+                                        <div style="font-weight: 500;">贝塔</div>
+                                        <div style="font-size: 0.8rem; color: var(--text-muted);">beta@example.com</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>高级开发者</td>
+                            <td><span class="status-badge status-active">活跃</span></td>
+                            <td>2026-02-15</td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <div class="user-info">
+                                    <div class="user-avatar" style="background-color: #f59e0b;">G</div>
+                                    <div>
+                                        <div style="font-weight: 500;">伽马</div>
+                                        <div style="font-size: 0.8rem; color: var(--text-muted);">gamma@example.com</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>产品经理</td>
+                            <td><span class="status-badge status-pending">待激活</span></td>
+                            <td>2026-05-01</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+</body>
+
+</html>

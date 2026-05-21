@@ -53,8 +53,13 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.status === 'complete') {
         console.log('标签页加载完成:', tabId);
 
-        // 页面加载完成后，可以重置某些状态
-        // 例如：关闭捕获模式和验证模式
+        // 通知侧边栏重置状态以同步刷新
+        chrome.runtime.sendMessage({
+            type: 'TAB_RELOADED',
+            tabId: tabId
+        }).catch(err => {
+            // 忽略没有 Side Panel 监听时的错误
+        });
     }
 });
 
