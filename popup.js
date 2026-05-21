@@ -22,11 +22,89 @@ let validateMode = false;
 let currentTabId = null;
 
 /**
+ * 检查 URL 是否受支持
+ */
+function isSupportedUrl(url) {
+    if (!url) return false;
+    return url.startsWith('http://') || url.startsWith('https://') || url.startsWith('file://');
+}
+
+/**
+ * 同步状态到目标标签页，并检查是否支持该页面
+ */
+async function syncStateWithTab(tab) {
+    if (!tab) return;
+    currentTabId = tab.id;
+
+    const overlayId = 'unsupported-page-overlay';
+    let overlay = document.getElementById(overlayId);
+
+    if (!isSupportedUrl(tab.url)) {
+        // 显示不支持的遮罩层
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = overlayId;
+            overlay.style.position = 'fixed';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.width = '100%';
+            overlay.style.height = '100%';
+            overlay.style.backgroundColor = 'rgba(255, 255, 255, 0.95)';
+            overlay.style.display = 'flex';
+            overlay.style.flexDirection = 'column';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.zIndex = '9999';
+            overlay.style.padding = '20px';
+            overlay.style.textAlign = 'center';
+            
+            overlay.innerHTML = `
+                <div style="font-size: 3rem; margin-bottom: 15px;">⚠️</div>
+                <h3 style="margin-bottom: 10px; color: var(--text-primary);">当前页面不支持 XPath 捕获</h3>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 20px;">
+                    Chrome 限制了在系统页面 (如 chrome://)、扩展程序商店 (Chrome Web Store) 或空白页上运行脚本。
+                </p>
+                <p style="font-size: 0.8rem; color: var(--primary-solid); font-weight: 600;">
+                    请在普通的网页上使用本工具。
+                </p>
+            `;
+            document.body.appendChild(overlay);
+        }
+        return;
+    } else {
+        // 移除遮罩层
+        if (overlay) {
+            overlay.remove();
+        }
+    }
+
+    // 同步当前状态到标签页
+    try {
+        if (captureMode) {
+            const res = await sendMessageToTab({ type: 'TOGGLE_CAPTURE_MODE', enabled: true }, true);
+            if (!res) {
+                showToast('无法与页面通信，请刷新网页激活工具', 'error');
+            }
+        } else if (validateMode) {
+            const res = await sendMessageToTab({ type: 'TOGGLE_VALIDATE_MODE', enabled: true }, true);
+            if (res && xpathInput.value.trim()) {
+                validateXPath();
+            }
+        }
+    } catch (e) {
+        console.error('同步状态到 Tab 失败:', e);
+    }
+}
+
+/**
  * 初始化 - 获取当前标签页
  */
 async function init() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    currentTabId = tab.id;
+    if (tab) {
+        currentTabId = tab.id;
+        await syncStateWithTab(tab);
+    }
 
     // 建立与后台的长连接，用于检测侧边栏关闭
     try {
@@ -45,16 +123,16 @@ async function init() {
         if (data.captureMode) {
             captureMode = true;
             updateButtonState(toggleCaptureBtn, true, '停止', '启动');
-            await sendMessageToTab({ type: 'TOGGLE_CAPTURE_MODE', enabled: true });
         }
 
         if (data.validateMode) {
             validateMode = true;
             updateButtonState(toggleValidateBtn, true, '停止', '启动');
-            await sendMessageToTab({ type: 'TOGGLE_VALIDATE_MODE', enabled: true });
-            if (data.lastXPath) {
-                validateXPath();
-            }
+        }
+
+        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (activeTab) {
+            await syncStateWithTab(activeTab);
         }
     });
 }
@@ -62,13 +140,18 @@ async function init() {
 /**
  * 向当前标签页发送消息
  */
-async function sendMessageToTab(message) {
+async function sendMessageToTab(message, silent = false) {
+    if (!currentTabId) return null;
     try {
         const response = await chrome.tabs.sendMessage(currentTabId, message);
         return response;
     } catch (error) {
-        console.error('发送消息失败:', error);
-        showToast('无法与页面通信，请刷新页面后重试', 'error');
+        if (!silent) {
+            console.error('发送消息失败:', error);
+            showToast('无法与页面通信，请刷新页面后重试', 'error');
+        } else {
+            console.warn('与页面通信静默失败:', error);
+        }
         return null;
     }
 }
@@ -444,3 +527,35 @@ xpathInput.addEventListener('keypress', (e) => {
 
 // 初始化
 init();
+
+// 监测 tab 切换以动态更新 activeTabId 并同步状态
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    try {
+        const tab = await chrome.tabs.get(activeInfo.tabId);
+        if (tab && tab.windowId === chrome.windows.WINDOW_ID_CURRENT) {
+            await syncStateWithTab(tab);
+        }
+    } catch (e) {
+        console.error(e);
+    }
+});
+
+// 监测 tab 更新 (如刷新或跳转新页面)
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+    if (tabId === currentTabId && changeInfo.status === 'complete') {
+        await syncStateWithTab(tab);
+    }
+});
+
+// 监测窗口焦点切换
+chrome.windows.onFocusChanged.addListener(async (windowId) => {
+    if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, windowId: windowId });
+        if (tab) {
+            await syncStateWithTab(tab);
+        }
+    } catch (e) {
+        console.error(e);
+    }
+});

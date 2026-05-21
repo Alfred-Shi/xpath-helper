@@ -68,7 +68,7 @@ function getXPath(element) {
     }
 
     const tagNameStr = isSVG ? `*[local-name()='${currentTagName}']` : currentTagName;
-    const pathIndex = index > 0 ? `[${index + 1}]` : '';
+    const pathIndex = (currentTagName === 'html' || currentTagName === 'body') ? '' : `[${index + 1}]`;
     path = `/${tagNameStr}${pathIndex}${path}`;
 
     current = current.parentNode;
@@ -294,8 +294,8 @@ function getSimilarityXPath(elements) {
   let pivotType = ''; // 'id' 或 'class'
   let pivotValue = '';
 
-  // 从右往左（从叶子到根）寻找第一个公共的 ID 或 Class 作为优化锚点
-  for (let i = minLen - 1; i >= 0; i--) {
+  // 从左往右（从根到叶子）寻找第一个公共的 ID 或 Class 作为优化锚点
+  for (let i = 0; i < minLen; i++) {
     const levelSteps = allSteps.map(steps => steps[i]);
     const firstStep = levelSteps[0];
     
