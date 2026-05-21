@@ -230,6 +230,9 @@ function handleMouseMove(event) {
 function captureElement(element) {
   if (!element) return;
 
+  // 清除先前所有高亮，确保单选时旧的高亮不会残留
+  removeAllHighlights();
+
   // 移除悬停高亮，添加点击高亮
   element.classList.remove(HOVER_HIGHLIGHT_CLASS);
   element.classList.add(CLICK_HIGHLIGHT_CLASS);
