@@ -90,6 +90,25 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 console.log('XPath 辅助工具后台服务已启动');
 
+/**
+ * 向指定标签页的所有 frame 广播消息
+ */
+async function sendMessageToAllFrames(tabId, message) {
+    try {
+        const frames = await chrome.webNavigation.getAllFrames({ tabId: tabId });
+        const promises = frames.map(frame => {
+            return chrome.tabs.sendMessage(tabId, message, { frameId: frame.frameId })
+                .catch(err => null);
+        });
+        return await Promise.all(promises);
+    } catch (error) {
+        console.error('后台广播消息失败:', error);
+        try {
+            await chrome.tabs.sendMessage(tabId, message);
+        } catch (e) { }
+    }
+}
+
 // 监听长连接（用于检测 Side Panel 关闭）
 chrome.runtime.onConnect.addListener((port) => {
     if (port.name === 'sidepanel-connection') {
@@ -103,14 +122,14 @@ chrome.runtime.onConnect.addListener((port) => {
 
         port.onDisconnect.addListener(async () => {
             if (currentTabId) {
-                console.log('Side Panel 关闭，正在清理 Tab:', currentTabId);
-                // 重置该 Tyab 的状态
+                console.log('Side Panel 关闭，正在清理 Tab 所有 frame:', currentTabId);
+                // 重置该 Tab 下所有 frame 的状态
                 try {
-                    await chrome.tabs.sendMessage(currentTabId, { type: 'DISABLE_ALL' });
+                    await sendMessageToAllFrames(currentTabId, { type: 'DISABLE_ALL' });
                     // 同时清除 storage 中的状态，以免下次打开时误判
-                    await chrome.storage.local.set({ 
-                        captureMode: false, 
-                        validateMode: false 
+                    await chrome.storage.local.set({
+                        captureMode: false,
+                        validateMode: false
                     });
                 } catch (error) {
                     // Tab 可能已经关闭了，忽略错误

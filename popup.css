@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap');
+
 /* XPath 辅助工具 - 弹出窗口样式 */
 
 * {
@@ -23,6 +25,7 @@
     --text-primary: #1f2937;
     --text-secondary: #6b7280;
     --border: #e5e7eb;
+    --overlay-bg: rgba(255, 255, 255, 0.95);
 
     /* 阴影 */
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
@@ -48,10 +51,56 @@
 body {
     width: 420px;
     min-height: 500px;
-    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Microsoft YaHei', sans-serif;
+    font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
     line-height: 1.6;
+}
+
+/* 暗黑模式适配 */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg-primary: #0f172a;
+        --bg-secondary: #1e293b;
+        --bg-card: #1e293b;
+        --text-primary: #f8fafc;
+        --text-secondary: #94a3b8;
+        --border: #334155;
+        --overlay-bg: rgba(15, 23, 42, 0.95);
+    }
+    
+    .xpath-input {
+        background: #1e293b;
+        border-color: #334155;
+    }
+    .xpath-input:focus {
+        border-color: #60a5fa;
+        box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2);
+    }
+    .copy-btn {
+        background: #1e293b;
+        border-color: #334155;
+    }
+    .match-item {
+        background: #1e293b;
+        border-color: #334155;
+    }
+    .match-item:hover {
+        border-color: var(--warning);
+        box-shadow: 0 0 8px rgba(255, 152, 0, 0.4);
+    }
+    .match-text, .match-attributes {
+        background: #0f172a;
+    }
+    .info-value {
+        background: #0f172a;
+        color: #e2e8f0;
+    }
+    .toast {
+        background: #1e293b;
+        color: #f8fafc;
+        border-color: #334155;
+    }
 }
 
 .container {

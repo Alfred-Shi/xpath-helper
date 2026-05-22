@@ -20,6 +20,7 @@ const toggleMatchesBtn = document.getElementById('toggleMatchesBtn');
 let captureMode = false;
 let validateMode = false;
 let currentTabId = null;
+let capturedFrameId = 0; // 记录捕获 XPath 时来源的 Frame ID
 
 /**
  * 检查 URL 是否受支持
@@ -49,7 +50,7 @@ async function syncStateWithTab(tab) {
             overlay.style.left = '0';
             overlay.style.width = '100%';
             overlay.style.height = '100%';
-            overlay.style.backgroundColor = 'rgba(255, 255, 255, 0.95)';
+            overlay.style.backgroundColor = 'var(--overlay-bg)';
             overlay.style.display = 'flex';
             overlay.style.flexDirection = 'column';
             overlay.style.alignItems = 'center';
@@ -78,18 +79,12 @@ async function syncStateWithTab(tab) {
         }
     }
 
-    // 同步当前状态到标签页
+    // 同步当前状态到所有标签页的 frame
     try {
-        if (captureMode) {
-            const res = await sendMessageToTab({ type: 'TOGGLE_CAPTURE_MODE', enabled: true }, true);
-            if (!res) {
-                showToast('无法与页面通信，请刷新网页激活工具', 'error');
-            }
-        } else if (validateMode) {
-            const res = await sendMessageToTab({ type: 'TOGGLE_VALIDATE_MODE', enabled: true }, true);
-            if (res && xpathInput.value.trim()) {
-                validateXPath();
-            }
+        await sendMessageToAllFrames({ type: 'TOGGLE_CAPTURE_MODE', enabled: captureMode });
+        await sendMessageToAllFrames({ type: 'TOGGLE_VALIDATE_MODE', enabled: validateMode });
+        if (validateMode && xpathInput.value.trim()) {
+            validateXPath();
         }
     } catch (e) {
         console.error('同步状态到 Tab 失败:', e);
@@ -140,10 +135,14 @@ async function init() {
 /**
  * 向当前标签页发送消息
  */
-async function sendMessageToTab(message, silent = false) {
+async function sendMessageToTab(message, silent = false, frameId = null) {
     if (!currentTabId) return null;
     try {
-        const response = await chrome.tabs.sendMessage(currentTabId, message);
+        const options = {};
+        if (frameId !== null) {
+            options.frameId = frameId;
+        }
+        const response = await chrome.tabs.sendMessage(currentTabId, message, options);
         return response;
     } catch (error) {
         if (!silent) {
@@ -153,6 +152,28 @@ async function sendMessageToTab(message, silent = false) {
             console.warn('与页面通信静默失败:', error);
         }
         return null;
+    }
+}
+
+/**
+ * 向当前标签页的所有 frame 发送消息
+ */
+async function sendMessageToAllFrames(message) {
+    if (!currentTabId) return [];
+    try {
+        const frames = await chrome.webNavigation.getAllFrames({ tabId: currentTabId });
+        const promises = frames.map(frame => {
+            return chrome.tabs.sendMessage(currentTabId, message, { frameId: frame.frameId })
+                .catch(err => {
+                    // 忽略未注入或不可达 frame 的错误
+                    return null;
+                });
+        });
+        return await Promise.all(promises);
+    } catch (error) {
+        console.error('广播消息失败:', error);
+        const res = await sendMessageToTab(message, true);
+        return [res];
     }
 }
 
@@ -193,17 +214,18 @@ async function toggleCaptureMode() {
     if (captureMode && validateMode) {
         validateMode = false;
         updateButtonState(toggleValidateBtn, false, '启动', '启动');
-        await sendMessageToTab({ type: 'TOGGLE_VALIDATE_MODE', enabled: false });
+        await sendMessageToAllFrames({ type: 'TOGGLE_VALIDATE_MODE', enabled: false });
     }
 
     updateButtonState(toggleCaptureBtn, captureMode, '停止', '启动');
 
-    const response = await sendMessageToTab({
+    const responses = await sendMessageToAllFrames({
         type: 'TOGGLE_CAPTURE_MODE',
         enabled: captureMode
     });
 
-    if (response?.success) {
+    const anySuccess = responses.some(res => res?.success);
+    if (anySuccess || responses.length > 0) {
         showToast(
             captureMode ? '✅ 捕获模式已启动，点击页面元素获取 XPath' : '⏸️ 捕获模式已停止',
             'success'
@@ -224,17 +246,18 @@ async function toggleValidateMode() {
     if (validateMode && captureMode) {
         captureMode = false;
         updateButtonState(toggleCaptureBtn, false, '启动', '启动');
-        await sendMessageToTab({ type: 'TOGGLE_CAPTURE_MODE', enabled: false });
+        await sendMessageToAllFrames({ type: 'TOGGLE_CAPTURE_MODE', enabled: false });
     }
 
     updateButtonState(toggleValidateBtn, validateMode, '停止', '启动');
 
-    const response = await sendMessageToTab({
+    const responses = await sendMessageToAllFrames({
         type: 'TOGGLE_VALIDATE_MODE',
         enabled: validateMode
     });
 
-    if (response?.success) {
+    const anySuccess = responses.some(res => res?.success);
+    if (anySuccess || responses.length > 0) {
         showToast(
             validateMode ? '✅ 验证模式已启动，输入 XPath 查看匹配' : '⏸️ 验证模式已停止',
             'success'
@@ -261,33 +284,99 @@ async function validateXPath() {
         return;
     }
 
-    const response = await sendMessageToTab({
-        type: 'VALIDATE_XPATH',
-        xpath: xpath
-    });
+    try {
+        const frames = await chrome.webNavigation.getAllFrames({ tabId: currentTabId });
+        
+        const validationPromises = frames.map(async (frame) => {
+            try {
+                const response = await chrome.tabs.sendMessage(currentTabId, {
+                    type: 'VALIDATE_XPATH',
+                    xpath: xpath
+                }, { frameId: frame.frameId });
+                
+                if (response) {
+                    if (response.success) {
+                        return {
+                            success: true,
+                            frameId: frame.frameId,
+                            count: response.count,
+                            elements: (response.elements || []).map(el => ({ ...el, frameId: frame.frameId }))
+                        };
+                    } else {
+                        return {
+                            success: false,
+                            error: response.error,
+                            frameId: frame.frameId
+                        };
+                    }
+                }
+            } catch (e) {
+                // 忽略未注入或不可达 frame 的错误
+            }
+            return { success: false, frameId: frame.frameId, count: 0, elements: [] };
+        });
 
-    if (response?.success) {
-        const count = response.count;
-        const elements = response.elements || [];
+        const results = await Promise.all(validationPromises);
+        
+        let totalCount = 0;
+        let allElements = [];
+        let hasSuccess = false;
+        let syntaxErrorMsg = null;
 
-        matchCount.textContent = `${count} 个匹配`;
+        results.forEach(res => {
+            if (res.success) {
+                hasSuccess = true;
+                totalCount += res.count;
+                allElements.push(...res.elements);
+            } else if (res.error) {
+                syntaxErrorMsg = res.error;
+            }
+        });
 
-        if (count === 0) {
-            showToast('⚠️ 未找到匹配的元素', 'error');
+        if (hasSuccess) {
+            matchCount.textContent = `${totalCount} 个匹配`;
+
+            if (totalCount === 0) {
+                showToast('⚠️ 未找到匹配的元素', 'error');
+                matchesSection.style.display = 'none';
+            } else {
+                showToast(`✅ 找到 ${totalCount} 个匹配 of 元素`, 'success');
+                displayMatchedElements(allElements);
+            }
+            // 保存 XPath
+            chrome.storage.local.set({ lastXPath: xpath });
+        } else if (syntaxErrorMsg) {
+            matchCount.textContent = '语法错误';
+            showToast(`❌ ${syntaxErrorMsg}`, 'error');
             matchesSection.style.display = 'none';
         } else {
-            showToast(`✅ 找到 ${count} 个匹配的元素`, 'success');
-            // 显示匹配元素列表
-            displayMatchedElements(elements);
+            matchCount.textContent = '0 个匹配';
+            showToast('⚠️ 未找到匹配的元素', 'error');
+            matchesSection.style.display = 'none';
         }
-
-        // 保存 XPath
-        chrome.storage.local.set({ lastXPath: xpath });
-    } else {
-        const errMsg = response?.error || 'XPath 语法错误';
-        matchCount.textContent = '语法错误';
-        showToast(`❌ ${errMsg}`, 'error');
-        matchesSection.style.display = 'none';
+    } catch (err) {
+        console.error('获取所有 frame 失败:', err);
+        // 退回到单框架验证
+        const response = await sendMessageToTab({
+            type: 'VALIDATE_XPATH',
+            xpath: xpath
+        });
+        if (response?.success) {
+            const count = response.count;
+            const elements = (response.elements || []).map(el => ({ ...el, frameId: 0 }));
+            matchCount.textContent = `${count} 个匹配`;
+            if (count === 0) {
+                matchesSection.style.display = 'none';
+            } else {
+                displayMatchedElements(elements);
+            }
+            chrome.storage.local.set({ lastXPath: xpath });
+        } else {
+            const errMsg = response?.error || 'XPath 语法错误';
+            matchCount.textContent = '语法错误';
+            showToast(`❌ ${errMsg}`, 'error');
+            matchesSection.style.display = 'none';
+        }
     }
 }
 
@@ -320,15 +409,13 @@ async function copyXPath() {
  * 清除所有高亮
  */
 async function clearHighlights() {
-    const response = await sendMessageToTab({ type: 'CLEAR_HIGHLIGHTS' });
+    await sendMessageToAllFrames({ type: 'CLEAR_HIGHLIGHTS' });
 
-    if (response?.success) {
-        showToast('✅ 已清除所有高亮', 'success');
-        matchCount.textContent = '';
-        infoSection.style.display = 'none';
-        matchesSection.style.display = 'none';
-        matchesList.innerHTML = '';
-    }
+    showToast('✅ 已清除所有高亮', 'success');
+    matchCount.textContent = '';
+    infoSection.style.display = 'none';
+    matchesSection.style.display = 'none';
+    matchesList.innerHTML = '';
 }
 
 /**
@@ -416,7 +503,7 @@ function displayMatchedElements(elements) {
             sendMessageToTab({
                 type: 'SCROLL_TO_ELEMENT',
                 index: el.index
-            });
+            }, false, el.frameId);
         });
         matchesList.appendChild(itemDiv);
     });
@@ -458,15 +545,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         matchesList.innerHTML = '';
         showToast('ℹ️ 页面已重新加载，状态已重置', 'info');
     } else if (message.type === 'XPATH_CAPTURED') {
+        capturedFrameId = (sender && typeof sender.frameId !== 'undefined') ? sender.frameId : 0;
+
         if (message.isMultiSelect) {
             xpathInput.value = message.xpath;
             showElementInfo(message);
             matchCount.textContent = `${message.count} 个匹配`;
             
+            const elementsWithFrame = (message.elements || []).map(el => ({
+                ...el,
+                frameId: capturedFrameId
+            }));
+
             if (message.count === 0) {
                 matchesSection.style.display = 'none';
             } else {
-                displayMatchedElements(message.elements);
+                displayMatchedElements(elementsWithFrame);
             }
             
             showToast(`✅ 相似元素 XPath 已生成 (${message.count} 个匹配)`, 'success');
