@@ -65,22 +65,30 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 // 监听快捷键命令
 chrome.commands.onCommand.addListener(async (command) => {
-    // open-side-panel 命令已移除，使用 _execute_action 原生处理
-
     if (command === 'toggle-capture') {
         // 获取当前活动标签页
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
         if (tab) {
-            // 向 content script 发送切换捕获模式的消息
             try {
-                const response = await chrome.tabs.sendMessage(tab.id, {
-                    type: 'TOGGLE_CAPTURE_MODE_SHORTCUT'
+                // 获取并反转当前存储中的捕获状态
+                const storageData = await chrome.storage.local.get(['captureMode']);
+                const newMode = !storageData.captureMode;
+                await chrome.storage.local.set({ captureMode: newMode });
+
+                // 广播至该标签页的所有 frame
+                await sendMessageToAllFrames(tab.id, {
+                    type: 'TOGGLE_CAPTURE_MODE',
+                    enabled: newMode
                 });
 
-                if (response?.success) {
-                    console.log('捕获模式已通过快捷键切换:', response.enabled);
-                }
+                // 通知侧边栏同步更新按钮状态
+                chrome.runtime.sendMessage({
+                    type: 'CAPTURE_MODE_CHANGED',
+                    enabled: newMode
+                }).catch(() => {});
+
+                console.log('捕获模式已通过快捷键全局切换:', newMode);
             } catch (error) {
                 console.error('快捷键切换失败:', error);
             }
@@ -109,13 +117,13 @@ async function sendMessageToAllFrames(tabId, message) {
     }
 }
 
-// 监听长连接（用于检测 Side Panel 关闭）
+// 监听长连接（用于检测 Side Panel 关闭并动态跟踪当前活动 Tab）
 chrome.runtime.onConnect.addListener((port) => {
     if (port.name === 'sidepanel-connection') {
         let currentTabId = null;
 
         port.onMessage.addListener((msg) => {
-            if (msg.type === 'INIT' && msg.tabId) {
+            if ((msg.type === 'INIT' || msg.type === 'UPDATE_TAB') && msg.tabId) {
                 currentTabId = msg.tabId;
             }
         });
@@ -132,7 +140,6 @@ chrome.runtime.onConnect.addListener((port) => {
                         validateMode: false
                     });
                 } catch (error) {
-                    // Tab 可能已经关闭了，忽略错误
                     console.log('无法清理 Tab (可能已关闭):', error);
                 }
             }

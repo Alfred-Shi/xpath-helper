@@ -21,6 +21,7 @@ let captureMode = false;
 let validateMode = false;
 let currentTabId = null;
 let capturedFrameId = 0; // 记录捕获 XPath 时来源的 Frame ID
+let backgroundPort = null; // 侧边栏与后台的长连接实例
 
 /**
  * 检查 URL 是否受支持
@@ -101,10 +102,10 @@ async function init() {
         await syncStateWithTab(tab);
     }
 
-    // 建立与后台的长连接，用于检测侧边栏关闭
+    // 建立与后台的长连接，用于检测侧边栏关闭并同步当前 Tab
     try {
-        const port = chrome.runtime.connect({ name: 'sidepanel-connection' });
-        port.postMessage({ type: 'INIT', tabId: currentTabId });
+        backgroundPort = chrome.runtime.connect({ name: 'sidepanel-connection' });
+        backgroundPort.postMessage({ type: 'INIT', tabId: currentTabId });
     } catch (e) {
         console.error('无法连接后台:', e);
     }
@@ -327,7 +328,12 @@ async function validateXPath() {
             if (res.success) {
                 hasSuccess = true;
                 totalCount += res.count;
-                allElements.push(...res.elements);
+                // 保存 frameLocalIndex 供精准点击寻址
+                const itemsWithLocalIndex = (res.elements || []).map(el => ({
+                    ...el,
+                    frameLocalIndex: el.index
+                }));
+                allElements.push(...itemsWithLocalIndex);
             } else if (res.error) {
                 syntaxErrorMsg = res.error;
             }
@@ -340,7 +346,7 @@ async function validateXPath() {
                 showToast('⚠️ 未找到匹配的元素', 'error');
                 matchesSection.style.display = 'none';
             } else {
-                showToast(`✅ 找到 ${totalCount} 个匹配 of 元素`, 'success');
+                showToast(`✅ 找到 ${totalCount} 个匹配元素`, 'success');
                 displayMatchedElements(allElements);
             }
             // 保存 XPath
@@ -431,7 +437,7 @@ function showElementInfo(data) {
 }
 
 /**
- * 显示匹配元素列表
+ * 显示匹配元素列表（支持全局统一编号与长列表渲染截断）
  */
 function displayMatchedElements(elements) {
     if (!elements || elements.length === 0) {
@@ -442,15 +448,22 @@ function displayMatchedElements(elements) {
     // 清空之前的列表
     matchesList.innerHTML = '';
 
-    // 生成元素列表
-    elements.forEach(el => {
+    // 性能优化：最大渲染前 100 条，避免巨量 DOM 导致侧边栏假死卡顿
+    const MAX_RENDER_COUNT = 100;
+    const renderElements = elements.slice(0, MAX_RENDER_COUNT);
+
+    renderElements.forEach((el, idx) => {
         const itemDiv = document.createElement('div');
         itemDiv.className = 'match-item';
 
-        // 构建HTML内容
+        // 全局递增展示序号，保留局部 frameLocalIndex 用于交互定位
+        const globalIndex = idx + 1;
+        const localIndex = el.frameLocalIndex || el.index || globalIndex;
+
+        // 构建 HTML 内容
         let html = `
             <div class="match-item-header">
-                <span class="match-index">#${el.index}</span>
+                <span class="match-index">#${globalIndex}</span>
                 <span class="match-tag">&lt;${el.tagName}&gt;</span>
             </div>
             <div class="match-details">
@@ -498,15 +511,25 @@ function displayMatchedElements(elements) {
         }
 
         itemDiv.innerHTML = html;
-        // 绑定点击事件以滚动并闪烁网页上的目标元素
+        // 绑定点击事件以滚动并闪烁网页上的目标元素（传递帧内局部索引）
         itemDiv.addEventListener('click', () => {
             sendMessageToTab({
                 type: 'SCROLL_TO_ELEMENT',
-                index: el.index
+                index: localIndex
             }, false, el.frameId);
         });
         matchesList.appendChild(itemDiv);
     });
+
+    if (elements.length > MAX_RENDER_COUNT) {
+        const tipDiv = document.createElement('div');
+        tipDiv.style.textAlign = 'center';
+        tipDiv.style.padding = '10px';
+        tipDiv.style.fontSize = '0.8rem';
+        tipDiv.style.color = 'var(--text-secondary)';
+        tipDiv.textContent = `已展示前 ${MAX_RENDER_COUNT} 项，其余 ${elements.length - MAX_RENDER_COUNT} 项已折叠`;
+        matchesList.appendChild(tipDiv);
+    }
 
     // 显示匹配元素区域
     matchesSection.style.display = 'block';
@@ -533,7 +556,19 @@ function toggleMatchesList() {
  * 监听来自 content script 或 background 的消息
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'TAB_RELOADED' && message.tabId === currentTabId) {
+    if (message.type === 'CAPTURE_MODE_CHANGED') {
+        // 快捷键切换捕获模式时同步侧边栏按钮和状态
+        captureMode = message.enabled;
+        if (captureMode && validateMode) {
+            validateMode = false;
+            updateButtonState(toggleValidateBtn, false, '启动', '启动');
+        }
+        updateButtonState(toggleCaptureBtn, captureMode, '停止', '启动');
+        showToast(
+            captureMode ? '✅ 捕获模式已启动，点击页面元素获取 XPath' : '⏸️ 捕获模式已停止',
+            'success'
+        );
+    } else if (message.type === 'TAB_RELOADED' && message.tabId === currentTabId) {
         // 重置侧边栏状态以保持同步
         captureMode = false;
         validateMode = false;
@@ -554,7 +589,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             
             const elementsWithFrame = (message.elements || []).map(el => ({
                 ...el,
-                frameId: capturedFrameId
+                frameId: capturedFrameId,
+                frameLocalIndex: el.index
             }));
 
             if (message.count === 0) {
@@ -625,12 +661,22 @@ init();
 // 监测 tab 切换以动态更新 activeTabId 并同步状态
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
     try {
+        // 切离旧 Tab 前向旧 Tab 的所有 frame 广播清理
+        if (currentTabId && currentTabId !== activeInfo.tabId) {
+            sendMessageToAllFrames({ type: 'DISABLE_ALL' }).catch(() => {});
+        }
+
         const tab = await chrome.tabs.get(activeInfo.tabId);
         if (tab && tab.windowId === chrome.windows.WINDOW_ID_CURRENT) {
+            currentTabId = tab.id;
+            // 通知后台更新追踪的 Tab ID
+            if (backgroundPort) {
+                backgroundPort.postMessage({ type: 'UPDATE_TAB', tabId: currentTabId });
+            }
             await syncStateWithTab(tab);
         }
     } catch (e) {
-        console.error(e);
+        console.error('切换 Tab 同步失败:', e);
     }
 });
 

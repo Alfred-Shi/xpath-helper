@@ -69,7 +69,40 @@ function safeSendMessage(message) {
 }
 
 /**
- * 生成元素的 XPath 路径
+ * 获取元素过滤掉 xpath-helper- 内部样式后的纯净 Class 列表与字符串
+ * @param {Element} element - 目标元素
+ * @returns {{ classes: string[], classStr: string }}
+ */
+function getCleanElementClasses(element) {
+  if (!element || typeof element.getAttribute !== 'function') {
+    return { classes: [], classStr: '' };
+  }
+  const rawClass = element.getAttribute('class');
+  if (!rawClass || typeof rawClass !== 'string') {
+    return { classes: [], classStr: '' };
+  }
+  const classes = rawClass.trim().split(/\s+/).filter(cls => cls && !cls.startsWith('xpath-helper-'));
+  return {
+    classes: classes,
+    classStr: classes.join(' ')
+  };
+}
+
+/**
+ * 获取节点的视觉关联元素（针对 Text 或 Attr 节点定位其宿主元素）
+ * @param {Node} node - 目标节点
+ * @returns {Element|null}
+ */
+function getVisualElement(node) {
+  if (!node) return null;
+  if (node.nodeType === Node.ELEMENT_NODE) return node;
+  if (node.nodeType === Node.ATTRIBUTE_NODE) return node.ownerElement;
+  if (node.nodeType === Node.TEXT_NODE || node.nodeType === Node.COMMENT_NODE) return node.parentElement;
+  return null;
+}
+
+/**
+ * 生成元素的 XPath 路径（支持祖先稳定 ID 向上截断短化）
  * @param {Element} element - 目标元素
  * @returns {string} - 元素的 XPath 路径
  */
@@ -87,6 +120,20 @@ function getXPath(element) {
   let current = element;
 
   while (current && current.nodeType === Node.ELEMENT_NODE) {
+    // 祖先节点拥有稳定且唯一的 ID 时直接截断短化
+    if (current !== element && current !== document.body && current !== document.documentElement) {
+      const ancestorId = current.getAttribute('id');
+      if (ancestorId && ancestorId.trim() && !isDynamicId(ancestorId.trim())) {
+        try {
+          const testXPath = `//*[@id="${ancestorId.trim()}"]${path}`;
+          const res = document.evaluate(testXPath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+          if (res.snapshotLength === 1) {
+            return testXPath;
+          }
+        } catch (e) {}
+      }
+    }
+
     let index = 0;
     // 使用 localName 以更好地支持 SVG 和 HTML
     const currentTagName = current.localName;
@@ -113,7 +160,7 @@ function getXPath(element) {
 }
 
 /**
- * 生成更智能的 XPath（优先使用现代测试属性、唯一稳定 id、唯一包含 class 等）
+ * 生成更智能的 XPath（优先使用现代测试属性、唯一稳定 id、唯一语义 class 等）
  * @param {Element} element - 目标元素
  * @returns {string} - 优化后的 XPath 路径
  */
@@ -142,38 +189,35 @@ function getSmartXPath(element) {
     return `//*[@id="${id.trim()}"]`;
   }
 
-  // 3. 如果有唯一的 class（支持包含匹配以处理多类名）
-  const className = element.getAttribute('class');
-  if (className && className.trim()) {
-    // 过滤掉包含 xpath-helper 样式类的类名
-    const classes = className.trim().split(/\s+/)
-      .filter(cls => cls && !cls.startsWith('xpath-helper-'));
-    
-    if (classes.length > 0) {
-      // 3.1 尝试寻找列表中任意一个本身就唯一的 class
-      for (const cls of classes) {
-        const xpath = `//${tagNameStr}[contains(concat(' ', normalize-space(@class), ' '), ' ${cls} ')]`;
-        try {
-          const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-          if (result.snapshotLength === 1) {
-            return xpath;
-          }
-        } catch (e) {}
-      }
+  // 3. 提取纯净 class，优先使用非原子类的业务语义 class 匹配
+  const { classes } = getCleanElementClasses(element);
+  if (classes.length > 0) {
+    const semanticClasses = classes.filter(cls => !isUtilityClass(cls));
+    const candidateClasses = semanticClasses.length > 0 ? semanticClasses : classes;
 
-      // 3.2 尝试组合前几个 class 进行唯一定位
-      if (classes.length > 1) {
-        const conditions = classes.slice(0, 3) // 最多取前3个进行组合，避免表达式过长
-          .map(cls => `contains(concat(' ', normalize-space(@class), ' '), ' ${cls} ')`)
-          .join(' and ');
-        const xpath = `//${tagNameStr}[${conditions}]`;
-        try {
-          const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-          if (result.snapshotLength === 1) {
-            return xpath;
-          }
-        } catch (e) {}
-      }
+    // 3.1 尝试寻找列表中任意一个本身就唯一的 class
+    for (const cls of candidateClasses) {
+      const xpath = `//${tagNameStr}[contains(concat(' ', normalize-space(@class), ' '), ' ${cls} ')]`;
+      try {
+        const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+        if (result.snapshotLength === 1) {
+          return xpath;
+        }
+      } catch (e) {}
+    }
+
+    // 3.2 尝试组合前几个 class 进行唯一定位
+    if (candidateClasses.length > 1) {
+      const conditions = candidateClasses.slice(0, 3)
+        .map(cls => `contains(concat(' ', normalize-space(@class), ' '), ' ${cls} ')`)
+        .join(' and ');
+      const xpath = `//${tagNameStr}[${conditions}]`;
+      try {
+        const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+        if (result.snapshotLength === 1) {
+          return xpath;
+        }
+      } catch (e) {}
     }
   }
 
@@ -189,21 +233,20 @@ function getSmartXPath(element) {
     } catch (e) {}
   }
 
-  // 4.5 尝试基于唯一的短文本内容定位
+  // 4.5 尝试基于唯一的短文本内容定位 (改用 normalize-space 增强兼容)
   const text = element.textContent?.trim();
-  if (text && text.length > 0 && text.length <= 15 && !text.includes('\n') && !text.includes('\r')) {
+  if (text && text.length > 0 && text.length <= 25 && !text.includes('\n') && !text.includes('\r')) {
     if (element.children.length <= 1) {
       let quoteChar = '"';
       if (text.includes('"')) {
         if (text.includes("'")) {
-          // 如果同时包含单双引号，为了安全跳过 text 匹配
           quoteChar = null;
         } else {
           quoteChar = "'";
         }
       }
       if (quoteChar) {
-        const xpath = `//${tagNameStr}[text()=${quoteChar}${text}${quoteChar}]`;
+        const xpath = `//${tagNameStr}[normalize-space(.)=${quoteChar}${text}${quoteChar}]`;
         try {
           const result = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
           if (result.snapshotLength === 1) {
@@ -214,7 +257,7 @@ function getSmartXPath(element) {
     }
   }
 
-  // 5. 否则返回完整绝对路径
+  // 5. 否则返回优化后的绝对路径
   return getXPath(element);
 }
 
@@ -282,11 +325,12 @@ function highlightValidationElements(elements) {
   });
   validationHighlightedElements = [];
 
-  // 添加新的验证高亮
-  elements.forEach(el => {
-    if (el && el.classList) {
-      el.classList.add(VALIDATE_HIGHLIGHT_CLASS);
-      validationHighlightedElements.push(el);
+  // 添加新的验证高亮（支持属性与文本节点的宿主元素）
+  elements.forEach(node => {
+    const visualEl = getVisualElement(node);
+    if (visualEl && visualEl.classList) {
+      visualEl.classList.add(VALIDATE_HIGHLIGHT_CLASS);
+      validationHighlightedElements.push(visualEl);
     }
   });
 }
@@ -320,13 +364,16 @@ function captureElement(element) {
   // 生成 XPath
   const xpath = getSmartXPath(element);
 
+  // 获取干净的 Class 字符串
+  const cleanClassName = getCleanElementClasses(element).classStr;
+
   // 发送 XPath 到 popup/sidepanel
   safeSendMessage({
     type: 'XPATH_CAPTURED',
     xpath: xpath,
     tagName: element.localName,
     id: element.getAttribute('id') || '',
-    className: element.getAttribute('class') || '', // 修复 SVG class 显示问题
+    className: cleanClassName,
     text: element.textContent?.substring(0, 50) || ''
   });
 }
@@ -429,194 +476,157 @@ function getRelativePathSteps(element, ancestor) {
 }
 
 /**
- * 计算多个元素的相似 XPath
+ * 计算多个元素的相似 XPath (支持同深/跨深度归纳，避免错位)
  */
 function getSimilarityXPath(elements) {
   if (elements.length === 0) return '';
   if (elements.length === 1) return getSmartXPath(elements[0]);
 
-  // 1. 尝试使用最近公共祖先 (LCA) 唯一定位算法
+  // 1. 优先使用最近公共祖先 (LCA) 算法
   const lca = getLCA(elements);
   if (lca && lca !== document.body && lca !== document.documentElement && lca.nodeType === Node.ELEMENT_NODE) {
     const lcaXPath = getSmartXPath(lca);
     if (lcaXPath) {
       const relativeStepsList = elements.map(el => getRelativePathSteps(el, lca));
       const minSubLen = Math.min(...relativeStepsList.map(s => s.length));
-      
-      const subParts = [];
-      for (let i = 0; i < minSubLen; i++) {
-        const levelSteps = relativeStepsList.map(s => s[i]);
-        const firstStep = levelSteps[0];
-        const sameTagName = levelSteps.every(step => step.tagName === firstStep.tagName);
-        
-        if (!sameTagName) {
-          subParts.push('*');
-          continue;
-        }
-        
-        const tagNameStr = firstStep.isSVG ? `*[local-name()='${firstStep.tagName}']` : firstStep.tagName;
-        
-        // 寻找该层级的公共 Class
-        const classesList = levelSteps.map(step => {
-          const cls = step.className;
-          if (!cls) return [];
-          const clsStr = typeof cls === 'string' ? cls : (cls.baseVal || '');
-          return clsStr.trim().split(/\s+/).filter(Boolean);
-        });
-        
-        let commonClasses = [];
-        if (classesList.length > 0) {
-          commonClasses = classesList[0].filter(cls => 
-            !cls.startsWith('xpath-helper-') && classesList.every(clsList => clsList.includes(cls))
-          );
-        }
-        
-        // 检查所有元素的兄弟索引是否完全相同
-        const sameIndex = levelSteps.every(step => step.index === firstStep.index);
-        
-        let stepStr = tagNameStr;
-        if (commonClasses.length > 0) {
-          const specificClasses = commonClasses.filter(cls => !isUtilityClass(cls));
-          let chosenClasses = [];
-          if (specificClasses.length > 0) {
-            chosenClasses = specificClasses.slice(0, 2);
-          } else {
-            chosenClasses = [...commonClasses].sort((a, b) => b.length - a.length).slice(0, 2);
+      const maxSubLen = Math.max(...relativeStepsList.map(s => s.length));
+
+      // 1.1 若相对深度完全相同，按层级推导公共标签与 Class
+      if (minSubLen === maxSubLen) {
+        const subParts = [];
+        for (let i = 0; i < minSubLen; i++) {
+          const levelSteps = relativeStepsList.map(s => s[i]);
+          const firstStep = levelSteps[0];
+          const sameTagName = levelSteps.every(step => step.tagName === firstStep.tagName);
+
+          if (!sameTagName) {
+            subParts.push('*');
+            continue;
           }
-          if (chosenClasses.length > 0) {
-            const conditions = chosenClasses.map(cls => `contains(concat(' ', normalize-space(@class), ' '), ' ${cls} ')`).join(' and ');
-            stepStr += `[${conditions}]`;
+
+          const tagNameStr = firstStep.isSVG ? `*[local-name()='${firstStep.tagName}']` : firstStep.tagName;
+
+          // 寻找该层级的纯净公共 Class
+          const classesList = levelSteps.map(step => {
+            const cls = step.className;
+            if (!cls) return [];
+            const clsStr = typeof cls === 'string' ? cls : (cls.baseVal || '');
+            return clsStr.trim().split(/\s+/).filter(c => c && !c.startsWith('xpath-helper-'));
+          });
+
+          let commonClasses = [];
+          if (classesList.length > 0) {
+            commonClasses = classesList[0].filter(cls => classesList.every(clsList => clsList.includes(cls)));
           }
-        } else if (sameIndex) {
-          stepStr += `[${firstStep.index}]`;
+
+          const sameIndex = levelSteps.every(step => step.index === firstStep.index);
+
+          let stepStr = tagNameStr;
+          if (commonClasses.length > 0) {
+            const specificClasses = commonClasses.filter(cls => !isUtilityClass(cls));
+            const chosenClasses = specificClasses.length > 0 ? specificClasses.slice(0, 2) : commonClasses.slice(0, 2);
+            if (chosenClasses.length > 0) {
+              const conditions = chosenClasses.map(cls => `contains(concat(' ', normalize-space(@class), ' '), ' ${cls} ')`).join(' and ');
+              stepStr += `[${conditions}]`;
+            }
+          } else if (sameIndex) {
+            stepStr += `[${firstStep.index}]`;
+          }
+
+          subParts.push(stepStr);
         }
-        
-        subParts.push(stepStr);
+
+        const candidateXPath = lcaXPath + '/' + subParts.join('/');
+        try {
+          const matchResult = document.evaluate(candidateXPath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+          if (matchResult.snapshotLength >= elements.length) {
+            return candidateXPath;
+          }
+        } catch (e) {}
       }
-      
-      return lcaXPath + '/' + subParts.join('/');
+
+      // 1.2 若存在跨深度或层级非对称，通过 // 后代轴归纳目标叶子特征
+      const targetTagNames = elements.map(el => el.localName);
+      const allSameTargetTag = targetTagNames.every(t => t === targetTagNames[0]);
+      const targetTagStr = allSameTargetTag ? (elements[0].namespaceURI === 'http://www.w3.org/2000/svg' ? `*[local-name()='${targetTagNames[0]}']` : targetTagNames[0]) : '*';
+
+      const targetClassesList = elements.map(el => getCleanElementClasses(el).classes);
+      let commonTargetClasses = [];
+      if (targetClassesList.length > 0) {
+        commonTargetClasses = targetClassesList[0].filter(cls => targetClassesList.every(list => list.includes(cls)));
+      }
+
+      const specificTargetClasses = commonTargetClasses.filter(cls => !isUtilityClass(cls));
+      const chosenTargetClasses = specificTargetClasses.length > 0 ? specificTargetClasses.slice(0, 2) : commonTargetClasses.slice(0, 2);
+
+      let targetCondition = '';
+      if (chosenTargetClasses.length > 0) {
+        targetCondition = `[${chosenTargetClasses.map(cls => `contains(concat(' ', normalize-space(@class), ' '), ' ${cls} ')`).join(' and ')}]`;
+      }
+
+      const lcaDescendantXPath = `${lcaXPath}//${targetTagStr}${targetCondition}`;
+      try {
+        const matchResult = document.evaluate(lcaDescendantXPath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+        if (matchResult.snapshotLength >= elements.length) {
+          return lcaDescendantXPath;
+        }
+      } catch (e) {}
     }
   }
 
-  // 2. 兜底方案：退回到原有的自下而上的全局 Pivot 算法
+  // 2. 兜底方案：自根部向下寻找公共锚点，结合叶子特征生成
   const allSteps = elements.map(getElementPathSteps);
   const minLen = Math.min(...allSteps.map(steps => steps.length));
-  
-  let pivotIndex = -1;
-  let pivotType = ''; // 'id' 或 'class'
-  let pivotValue = []; // 保存选中的公共类名数组，或 ID 字符串
 
-  for (let i = minLen - 1; i >= 0; i--) {
-    const levelSteps = allSteps.map(steps => steps[i]);
-    const firstStep = levelSteps[0];
-    
-    const sameId = firstStep.id && !isDynamicId(firstStep.id) && levelSteps.every(step => step.id === firstStep.id);
-    if (sameId) {
-      pivotIndex = i;
-      pivotType = 'id';
-      pivotValue = firstStep.id;
+  let commonPrefixLen = 0;
+  for (let i = 0; i < minLen; i++) {
+    const nodesAtI = allSteps.map(steps => steps[i]);
+    const firstNode = nodesAtI[0];
+    const allSameTag = nodesAtI.every(n => n.tagName === firstNode.tagName);
+    const allSameIndex = nodesAtI.every(n => n.index === firstNode.index);
+    if (allSameTag && allSameIndex) {
+      commonPrefixLen = i + 1;
+    } else {
       break;
     }
-    
-    const classesList = levelSteps.map(step => {
-      const cls = step.className;
-      if (!cls) return [];
-      const clsStr = typeof cls === 'string' ? cls : (cls.baseVal || '');
-      return clsStr.trim().split(/\s+/).filter(Boolean);
-    });
-    
-    let commonClasses = [];
-    if (classesList.length > 0) {
-      commonClasses = classesList[0].filter(cls => 
-        !cls.startsWith('xpath-helper-') && classesList.every(clsList => clsList.includes(cls))
-      );
-    }
-    
-    if (commonClasses.length > 0) {
-      const specificClasses = commonClasses.filter(cls => !isUtilityClass(cls));
-      let chosenClasses = [];
-      
-      if (specificClasses.length > 0) {
-        chosenClasses = specificClasses.slice(0, 2);
-      } else {
-        chosenClasses = [...commonClasses].sort((a, b) => b.length - a.length).slice(0, 2);
-      }
-
-      if (chosenClasses.length > 0) {
-        pivotIndex = i;
-        pivotType = 'class';
-        pivotValue = chosenClasses;
-        break;
-      }
-    }
   }
 
-  const xpathParts = [];
-  let startIdx = 0;
-
-  if (pivotIndex !== -1) {
-    if (pivotType === 'id') {
-      xpathParts.push(`//*[@id="${pivotValue}"]`);
-    } else if (pivotType === 'class') {
-      const firstStep = allSteps[0][pivotIndex];
-      const tagNameStr = firstStep.isSVG ? `*[local-name()='${firstStep.tagName}']` : firstStep.tagName;
-      const conditions = pivotValue.map(cls => `contains(concat(' ', normalize-space(@class), ' '), ' ${cls} ')`).join(' and ');
-      xpathParts.push(`//${tagNameStr}[${conditions}]`);
-    }
-    startIdx = pivotIndex + 1;
-  } else {
-    xpathParts.push('');
-  }
-
-  for (let i = startIdx; i < minLen; i++) {
-    const levelSteps = allSteps.map(steps => steps[i]);
-    const firstStep = levelSteps[0];
-    const sameTagName = levelSteps.every(step => step.tagName === firstStep.tagName);
-    
-    if (!sameTagName) {
-      xpathParts.push('*');
+  const prefixParts = [];
+  for (let i = 0; i < commonPrefixLen; i++) {
+    const step = allSteps[0][i];
+    if (step.id && !isDynamicId(step.id)) {
+      prefixParts.length = 0;
+      prefixParts.push(`//*[@id="${step.id}"]`);
       continue;
     }
-    
-    const tagNameStr = firstStep.isSVG ? `*[local-name()='${firstStep.tagName}']` : firstStep.tagName;
-    
-    const classesList = levelSteps.map(step => {
-      const cls = step.className;
-      if (!cls) return [];
-      const clsStr = typeof cls === 'string' ? cls : (cls.baseVal || '');
-      return clsStr.trim().split(/\s+/).filter(Boolean);
-    });
-    
-    let commonClasses = [];
-    if (classesList.length > 0) {
-      commonClasses = classesList[0].filter(cls => 
-        !cls.startsWith('xpath-helper-') && classesList.every(clsList => clsList.includes(cls))
-      );
+    const tagStr = step.isSVG ? `*[local-name()='${step.tagName}']` : step.tagName;
+    const idxStr = (step.tagName === 'html' || step.tagName === 'body') ? '' : `[${step.index}]`;
+    if (prefixParts.length === 0) {
+      prefixParts.push(`/${tagStr}${idxStr}`);
+    } else {
+      prefixParts.push(`${tagStr}${idxStr}`);
     }
-    
-    const sameIndex = levelSteps.every(step => step.index === firstStep.index);
-    
-    let stepStr = tagNameStr;
-    if (commonClasses.length > 0) {
-      const specificClasses = commonClasses.filter(cls => !isUtilityClass(cls));
-      let chosenClasses = [];
-      if (specificClasses.length > 0) {
-        chosenClasses = specificClasses.slice(0, 2);
-      } else {
-        chosenClasses = [...commonClasses].sort((a, b) => b.length - a.length).slice(0, 2);
-      }
-      if (chosenClasses.length > 0) {
-        const conditions = chosenClasses.map(cls => `contains(concat(' ', normalize-space(@class), ' '), ' ${cls} ')`).join(' and ');
-        stepStr += `[${conditions}]`;
-      }
-    } else if (sameIndex) {
-      stepStr += `[${firstStep.index}]`;
-    }
-    
-    xpathParts.push(stepStr);
   }
 
-  return xpathParts.join('/');
+  const leafStepList = allSteps.map(steps => steps[steps.length - 1]);
+  const leafSameTag = leafStepList.every(s => s.tagName === leafStepList[0].tagName);
+  const leafTagStr = leafSameTag ? (leafStepList[0].isSVG ? `*[local-name()='${leafStepList[0].tagName}']` : leafStepList[0].tagName) : '*';
+
+  const leafClassesList = elements.map(el => getCleanElementClasses(el).classes);
+  let commonLeafClasses = [];
+  if (leafClassesList.length > 0) {
+    commonLeafClasses = leafClassesList[0].filter(cls => leafClassesList.every(list => list.includes(cls)));
+  }
+  const specificLeafClasses = commonLeafClasses.filter(cls => !isUtilityClass(cls));
+  const chosenLeafClasses = specificLeafClasses.length > 0 ? specificLeafClasses.slice(0, 2) : commonLeafClasses.slice(0, 2);
+
+  let leafCondition = '';
+  if (chosenLeafClasses.length > 0) {
+    leafCondition = `[${chosenLeafClasses.map(cls => `contains(concat(' ', normalize-space(@class), ' '), ' ${cls} ')`).join(' and ')}]`;
+  }
+
+  const basePrefix = prefixParts.length > 0 ? prefixParts.join('/') : '';
+  return `${basePrefix}//${leafTagStr}${leafCondition}`;
 }
 
 /**
@@ -647,7 +657,7 @@ function processMultiSelection() {
       index: index + 1,
       tagName: el.tagName?.toLowerCase() || '',
       id: el.getAttribute('id') || '',
-      className: typeof el.getAttribute('class') === 'string' ? el.getAttribute('class') : '',
+      className: getCleanElementClasses(el).classStr,
       text: el.textContent?.trim().substring(0, 100) || '',
       attributes: Array.from(el.attributes || []).map(attr => ({
         name: attr.name,
@@ -656,13 +666,15 @@ function processMultiSelection() {
     };
   });
 
+  const cleanHeadClass = getCleanElementClasses(ctrlSelectedElements[0]).classStr;
+
   // 发送 XPath 到 popup/sidepanel，携带多选标记
   safeSendMessage({
     type: 'XPATH_CAPTURED',
     xpath: similarityXpath,
     tagName: `${ctrlSelectedElements[0].localName} (相似元素组)`,
     id: `已选中 ${ctrlSelectedElements.length} 个元素`,
-    className: ctrlSelectedElements[0].getAttribute('class') || '',
+    className: cleanHeadClass,
     text: `当前 XPath 共匹配 ${matchedElements.length} 个相似元素`,
     isMultiSelect: true,
     count: matchedElements.length,
@@ -682,8 +694,18 @@ function handleClick(event) {
   const element = event.target;
   if (element) {
     if (event.ctrlKey || event.metaKey || isCtrlPressed) {
-      // 多选模式
-      if (!ctrlSelectedElements.includes(element)) {
+      // 多选模式：支持追加与反选撤销
+      const existingIndex = ctrlSelectedElements.indexOf(element);
+      if (existingIndex !== -1) {
+        ctrlSelectedElements.splice(existingIndex, 1);
+        if (ctrlSelectedElements.length === 0) {
+          removeAllHighlights();
+          safeSendMessage({
+            type: 'CLEAR_HIGHLIGHTS'
+          });
+          return;
+        }
+      } else {
         ctrlSelectedElements.push(element);
       }
       processMultiSelection();
@@ -711,6 +733,13 @@ function handleKeyUp(event) {
   if (event.key === 'Control' || event.key === 'Meta') {
     isCtrlPressed = false;
   }
+}
+
+/**
+ * 窗口失焦事件处理器（防止按住按键切窗口导致的 Ctrl 状态粘滞）
+ */
+function handleWindowBlur() {
+  isCtrlPressed = false;
 }
 
 /**
@@ -743,20 +772,51 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const elements = getElementsByXPath(message.xpath);
         highlightValidationElements(elements);
 
-        // 提取每个元素的详细信息
-        const elementsInfo = elements.map((el, index) => {
-          return {
-            index: index + 1,
-            tagName: el.tagName?.toLowerCase() || '',
-            id: el.getAttribute('id') || '',
-            className: typeof el.getAttribute('class') === 'string' ? el.getAttribute('class') : '',
-            text: el.textContent?.trim().substring(0, 100) || '',
-            attributes: Array.from(el.attributes || []).map(attr => ({
-              name: attr.name,
-              value: attr.value
-            })).slice(0, 5) // 只取前5个属性
-          };
-        });
+        // 提取每个节点的详细信息，兼容 Element / Text / Attr 等不同类型节点
+        const elementsInfo = elements.map((node, index) => {
+          if (!node) return null;
+
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            return {
+              index: index + 1,
+              tagName: node.tagName?.toLowerCase() || '',
+              id: node.getAttribute('id') || '',
+              className: getCleanElementClasses(node).classStr,
+              text: node.textContent?.trim().substring(0, 100) || '',
+              attributes: Array.from(node.attributes || []).map(attr => ({
+                name: attr.name,
+                value: attr.value
+              })).slice(0, 5)
+            };
+          } else if (node.nodeType === Node.ATTRIBUTE_NODE) {
+            return {
+              index: index + 1,
+              tagName: `@${node.name}`,
+              id: '',
+              className: '',
+              text: node.value || '',
+              attributes: [{ name: node.name, value: node.value }]
+            };
+          } else if (node.nodeType === Node.TEXT_NODE) {
+            return {
+              index: index + 1,
+              tagName: '#text',
+              id: '',
+              className: '',
+              text: node.nodeValue?.trim().substring(0, 100) || '',
+              attributes: []
+            };
+          } else {
+            return {
+              index: index + 1,
+              tagName: node.nodeName?.toLowerCase() || '',
+              id: '',
+              className: '',
+              text: (node.nodeValue || node.textContent || '').trim().substring(0, 100),
+              attributes: []
+            };
+          }
+        }).filter(Boolean);
 
         sendResponse({
           success: true,
@@ -775,9 +835,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'SCROLL_TO_ELEMENT':
       // validationHighlightedElements 包含了当前匹配或捕获的高亮元素
       const targetElement = validationHighlightedElements[message.index - 1];
-      if (targetElement) {
+      if (targetElement && typeof targetElement.scrollIntoView === 'function') {
         targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        // 添加闪烁样式类
         targetElement.classList.add('xpath-helper-flash');
         setTimeout(() => {
           targetElement.classList.remove('xpath-helper-flash');
@@ -789,13 +848,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break;
 
     case 'TOGGLE_CAPTURE_MODE_SHORTCUT':
-      // 通过快捷键切换捕获模式
       captureMode = !captureMode;
       if (captureMode) {
         startCaptureListeners();
       } else {
         stopCaptureListeners();
         removeAllHighlights();
+        ctrlSelectedElements = [];
       }
       sendResponse({ success: true, enabled: captureMode });
       break;
@@ -833,6 +892,7 @@ function startCaptureListeners() {
   document.addEventListener('click', handleClick, true);
   document.addEventListener('keydown', handleKeyDown, true);
   document.addEventListener('keyup', handleKeyUp, true);
+  window.addEventListener('blur', handleWindowBlur);
   listenersActive = true;
 }
 
@@ -845,9 +905,11 @@ function stopCaptureListeners() {
   document.removeEventListener('click', handleClick, true);
   document.removeEventListener('keydown', handleKeyDown, true);
   document.removeEventListener('keyup', handleKeyUp, true);
+  window.removeEventListener('blur', handleWindowBlur);
+  isCtrlPressed = false;
   listenersActive = false;
 }
 
-// 移除默认的全局监听，改为动态加载
 // 初始化完成
 console.log('XPath 辅助工具已加载');
+
